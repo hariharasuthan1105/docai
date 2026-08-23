@@ -1,8 +1,13 @@
 """
-Pure Deterministic Command-Line Interface (CLI) for Document AI.
+Comprehensive Production CLI for Document AI.
 
-Operates completely from the local terminal without any external LLM,
-web UI, or API key dependencies.
+Subcommands:
+- predict: Process single document (PDF, image, text)
+- batch: Process a directory of documents
+- evaluate: Run ground-truth evaluation & metrics report
+- benchmark: Run component ablation study & robustness benchmarks
+- serve: Launch FastAPI REST microservice
+- demo: Launch Streamlit visual review UI
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ import json
 import logging
 import os
 import sys
+import time
 from typing import Optional
 
 _curr_dir = os.path.dirname(os.path.abspath(__file__))
@@ -22,11 +28,19 @@ for _p in [_parent_dir, _curr_dir]:
 
 try:
     from docai.config import load_custom_config
-    from docai.models.extraction_schema import FinalDocument
+    from docai.evaluation.ablation import format_ablation_markdown, run_ablation_study
+    from docai.evaluation.dataset import load_evaluation_dataset
+    from docai.evaluation.evaluator import DocumentAIEvaluator
+    from docai.evaluation.robustness import format_robustness_markdown, run_robustness_benchmark
+    from docai.models.extraction_schema import FinalDocument, ReviewDecision
     from docai.pipeline import DocumentAIPipeline
 except ImportError:
     from config import load_custom_config
-    from models.extraction_schema import FinalDocument
+    from evaluation.ablation import format_ablation_markdown, run_ablation_study
+    from evaluation.dataset import load_evaluation_dataset
+    from evaluation.evaluator import DocumentAIEvaluator
+    from evaluation.robustness import format_robustness_markdown, run_robustness_benchmark
+    from models.extraction_schema import FinalDocument, ReviewDecision
     from pipeline import DocumentAIPipeline
 
 BANNER_LINE = "=" * 60
@@ -44,201 +58,291 @@ def format_field_display(name: str, field_obj, unit: str = "") -> str:
     return f"{name:<17}: {val_str}\nConfidence       : {conf_str}\n"
 
 
-def format_visual_mark_display(name: str, mark_obj) -> str:
-    """Format visual mark status."""
+def format_visual_mark(name: str, mark_obj) -> str:
+    """Format a visual mark for terminal display."""
     if mark_obj.status == "not_implemented":
         status_str = "NOT IMPLEMENTED"
     elif mark_obj.present:
-        status_str = f"DETECTED ({mark_obj.confidence:.2f})"
+        status_str = f"DETECTED (conf: {mark_obj.confidence:.2f})"
     else:
-        status_str = "NOT DETECTED"
+        status_str = f"NOT DETECTED (conf: {mark_obj.confidence:.2f})"
+
     return f"{name:<17}: {status_str}"
 
 
-def print_cli_summary(
-    input_file: str,
-    doc: FinalDocument,
-    output_path: Optional[str] = None,
-):
-    """Print readable terminal output."""
+def display_results(final_doc: FinalDocument) -> None:
+    """Print clean formatted card to terminal."""
     print("\n" + BANNER_LINE)
     print("RESULT")
     print(BANNER_LINE + "\n")
 
-    hp_unit = "HP" if doc.horse_power.is_present() else ""
-    print(format_field_display("Dealer Name", doc.dealer_name))
-    print(format_field_display("Model Name", doc.model_name))
-    print(format_field_display("Horse Power", doc.horse_power, unit=hp_unit))
-    print(format_field_display("Asset Cost", doc.asset_cost))
+    print(format_field_display("Dealer Name", final_doc.dealer_name))
+    print(format_field_display("Model Name", final_doc.model_name))
+    print(format_field_display("Horse Power", final_doc.horse_power, unit="HP"))
+    print(format_field_display("Asset Cost", final_doc.asset_cost))
 
-    print(format_visual_mark_display("Dealer Signature", doc.dealer_signature))
-    print(format_visual_mark_display("Dealer Stamp", doc.dealer_stamp))
+    if final_doc.invoice_number.is_present():
+        print(format_field_display("Invoice Number", final_doc.invoice_number))
+    if final_doc.invoice_date.is_present():
+        print(format_field_display("Invoice Date", final_doc.invoice_date))
+    if final_doc.customer_name.is_present():
+        print(format_field_display("Customer Name", final_doc.customer_name))
+    if final_doc.phone_number.is_present():
+        print(format_field_display("Phone Number", final_doc.phone_number))
+
+    print(format_visual_mark("Dealer Signature", final_doc.dealer_signature))
+    print(format_visual_mark("Dealer Stamp", final_doc.dealer_stamp))
 
     print("\n" + BANNER_LINE)
-    decision = "NEEDS HUMAN REVIEW" if doc.needs_human_review else "AUTO-APPROVED"
-    print(f"Overall Score    : {doc.overall_confidence:.4f}")
-    print(f"Decision         : {decision}")
-    if doc.review_reasons:
-        print("Review Reasons   :")
-        for r in doc.review_reasons:
-            print(f"  - {r}")
+    print(f"Overall Score    : {final_doc.overall_confidence:.4f}")
+    if final_doc.decision == ReviewDecision.AUTO_APPROVE:
+        print("Decision         : AUTO-APPROVED")
+    elif final_doc.decision == ReviewDecision.REVIEW:
+        print("Decision         : REVIEW REQUIRED")
+    else:
+        print("Decision         : MANUAL REVIEW REQUIRED")
+
+    if final_doc.needs_human_review and final_doc.review_reasons:
+        print("\nReview Reasons:")
+        for r in final_doc.review_reasons:
+            print(f"  • {r}")
+
+    print(f"Processing Time  : {final_doc.processing_time_ms:.1f} ms")
+    print(BANNER_LINE + "\n")
+
+
+def cmd_predict(args: argparse.Namespace) -> int:
+    input_file = args.input_file
+    if not os.path.exists(input_file):
+        print(f"Error: Input file not found: '{input_file}'", file=sys.stderr)
+        sys.exit(1)
+
+    dealer_master, model_master = load_custom_config(args.config)
+    pipeline = DocumentAIPipeline(
+        dealer_master=dealer_master,
+        model_master=model_master,
+        ocr_lang=args.language,
+        enable_preprocessing=not args.no_preprocess,
+    )
+
+    print("\n" + BANNER_LINE)
+    print("DOCUMENT AI FIELD EXTRACTION")
     print(BANNER_LINE)
+    print(f"\nInput: {input_file}\n")
 
-    if output_path:
-        print(f"\n[✓] Saved structured JSON output to: {output_path}")
+    def print_progress(msg: str, step: int, total: int):
+        print(f"[{step}/{total}] {msg}")
+
+    final_doc = pipeline.process(
+        input_file,
+        document_id=os.path.basename(input_file),
+        on_progress=print_progress if not args.quiet else None,
+    )
+
+    display_results(final_doc)
+
+    if args.output:
+        out_dir = os.path.dirname(args.output)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        with open(args.output, "w", encoding="utf-8") as f:
+            json.dump(final_doc.to_legacy_dict(), f, indent=2, ensure_ascii=False)
+        print(f"[OK] Saved structured JSON output to: {args.output}\n")
+
+    return 0
 
 
-def export_json_result(input_file: str, doc: FinalDocument, output_path: str):
-    """Export the structured extraction result matching the required schema."""
-    result = {
-        "document": input_file,
-        "fields": {
-            "dealer_name": {
-                "value": doc.dealer_name.value,
-                "confidence": doc.dealer_name.confidence,
-                "bbox": doc.dealer_name.bbox,
-            },
-            "model_name": {
-                "value": doc.model_name.value,
-                "confidence": doc.model_name.confidence,
-                "bbox": doc.model_name.bbox,
-            },
-            "horse_power": {
-                "value": doc.horse_power.value,
-                "confidence": doc.horse_power.confidence,
-                "bbox": doc.horse_power.bbox,
-            },
-            "asset_cost": {
-                "value": doc.asset_cost.value,
-                "confidence": doc.asset_cost.confidence,
-                "bbox": doc.asset_cost.bbox,
-            },
-            "dealer_signature": {
-                "status": doc.dealer_signature.status,
-            },
-            "dealer_stamp": {
-                "status": doc.dealer_stamp.status,
-            },
-        },
-        "validation": {
-            "overall_confidence": doc.overall_confidence,
-            "needs_human_review": doc.needs_human_review,
-            "review_reasons": doc.review_reasons,
-        },
-    }
+def cmd_batch(args: argparse.Namespace) -> int:
+    input_dir = args.input_dir
+    if not os.path.isdir(input_dir):
+        print(f"Error: Input directory not found: '{input_dir}'", file=sys.stderr)
+        sys.exit(1)
 
-    out_dir = os.path.dirname(os.path.abspath(output_path))
-    if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
+    dealer_master, model_master = load_custom_config(args.config)
+    pipeline = DocumentAIPipeline(
+        dealer_master=dealer_master,
+        model_master=model_master,
+        ocr_lang=args.language,
+        enable_preprocessing=not args.no_preprocess,
+    )
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+    files = [
+        os.path.join(input_dir, f)
+        for f in os.listdir(input_dir)
+        if f.lower().endswith((".pdf", ".png", ".jpg", ".jpeg", ".txt"))
+    ]
+
+    if not files:
+        print(f"No document files found in '{input_dir}'")
+        return 0
+
+    print(f"\nProcessing batch of {len(files)} documents from '{input_dir}'...\n")
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
+
+    for fpath in files:
+        fname = os.path.basename(fpath)
+        print(f"Processing {fname}...")
+        res = pipeline.process(fpath, document_id=fname)
+        if args.output_dir:
+            out_file = os.path.join(args.output_dir, f"{os.path.splitext(fname)[0]}_result.json")
+            with open(out_file, "w", encoding="utf-8") as fp:
+                json.dump(res.to_legacy_dict(), fp, indent=2, ensure_ascii=False)
+        print(f"  -> Decision: {res.decision.value} (Score: {res.overall_confidence:.2f})")
+
+    print("\n[OK] Batch processing complete.\n")
+    return 0
+
+
+def cmd_evaluate(args: argparse.Namespace) -> int:
+    print("\n" + BANNER_LINE)
+    print("RUNNING DOCUMENT AI EVALUATION BENCHMARK")
+    print(BANNER_LINE + "\n")
+
+    dataset = load_evaluation_dataset(args.data_dir)
+    print(f"Loaded {len(dataset)} evaluation documents with ground truth annotations.")
+
+    evaluator = DocumentAIEvaluator()
+    metrics = evaluator.evaluate_dataset(dataset)
+    report_md = evaluator.generate_report_markdown(metrics)
+
+    print("\n" + report_md + "\n")
+
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(report_md)
+        print(f"[OK] Evaluation report saved to: {args.output}\n")
+
+    return 0
+
+
+def cmd_benchmark(args: argparse.Namespace) -> int:
+    print("\n" + BANNER_LINE)
+    print("RUNNING COMPONENT ABLATION & ROBUSTNESS BENCHMARKS")
+    print(BANNER_LINE + "\n")
+
+    dataset = load_evaluation_dataset(args.data_dir)
+
+    print("1. Running Ablation Study across system layers (Exp A - Exp E)...")
+    ablation_results = run_ablation_study(dataset)
+    ablation_md = format_ablation_markdown(ablation_results)
+    print("\n" + ablation_md + "\n")
+
+    print("2. Running Robustness Benchmark under degraded document conditions...")
+    robust_results = run_robustness_benchmark(dataset)
+    robust_md = format_robustness_markdown(robust_results)
+    print("\n" + robust_md + "\n")
+
+    if args.output:
+        full_report = ablation_md + "\n\n---\n\n" + robust_md
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(full_report)
+        print(f"[OK] Benchmark report saved to: {args.output}\n")
+
+    return 0
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+    from docai.api.app import create_app
+
+    print(f"\nStarting Document AI FastAPI REST Service on {args.host}:{args.port}...")
+    app = create_app()
+    uvicorn.run(app, host=args.host, port=args.port)
+    return 0
+
+
+def cmd_demo(args: argparse.Namespace) -> int:
+    demo_path = os.path.join(os.path.dirname(__file__), "demo", "app.py")
+    print(f"\nLaunching Streamlit Dashboard on port {args.port}...")
+    import subprocess
+    cmd = [sys.executable, "-m", "streamlit", "run", demo_path, "--server.port", str(args.port)]
+    return subprocess.call(cmd)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="docai",
-        description="Deterministic Document AI CLI — Extract fields from invoices using PaddleOCR, regex, fuzzy matching, and validation.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python -m docai invoice.pdf
-  python -m docai invoice.png --output result.json
-  python -m docai invoice.pdf --language hi
-  python -m docai invoice.pdf --config custom_catalogs.json
-        """,
+        description="Deterministic Document AI CLI (PaddleOCR + Regex + Fuzzy Matching)",
     )
-    parser.add_argument(
-        "input_file",
-        help="Path to input invoice or document (PDF, PNG, JPG, or TXT)",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        dest="output_file",
-        default=None,
-        help="Path to save full structured extraction result in JSON format",
-    )
-    parser.add_argument(
-        "-c",
-        "--config",
-        dest="config_file",
-        default=None,
-        help="Path to optional JSON file with custom dealer/model master catalogs",
-    )
-    parser.add_argument(
-        "-l",
-        "--language",
-        dest="language",
-        default="en",
-        help="OCR language code: en (English), hi (Hindi), gu (Gujarati). Default: en",
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        dest="verbose",
-        action="store_true",
-        default=False,
-        help="Enable detailed logging output",
-    )
+
+    parser.add_argument("-o", "--output", help="Path to write output JSON")
+    parser.add_argument("-c", "--config", help="Path to custom catalog JSON")
+    parser.add_argument("-l", "--language", default="en", help="OCR language code (en, hi, gu)")
+    parser.add_argument("--no-preprocess", action="store_true", help="Disable CV preprocessing")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Quiet mode")
+
+    subparsers = parser.add_subparsers(dest="command")
+
+    # Predict subcommand
+    pred_parser = subparsers.add_parser("predict", help="Process a single document file")
+    pred_parser.add_argument("input_file", help="Path to PDF, PNG, JPG, or TXT document")
+    pred_parser.add_argument("-o", "--output", help="Save structured JSON result to file")
+    pred_parser.add_argument("-c", "--config", help="Custom dealer/model catalog JSON")
+    pred_parser.add_argument("-l", "--language", default="en", help="OCR language code (en, hi, gu)")
+    pred_parser.add_argument("--no-preprocess", action="store_true", help="Disable CV preprocessing")
+    pred_parser.add_argument("-q", "--quiet", action="store_true", help="Suppress progress output")
+
+    # Batch subcommand
+    batch_parser = subparsers.add_parser("batch", help="Process a directory of documents")
+    batch_parser.add_argument("input_dir", help="Path to folder containing documents")
+    batch_parser.add_argument("-o", "--output-dir", help="Directory to save JSON results")
+    batch_parser.add_argument("-c", "--config", help="Custom catalog JSON")
+    batch_parser.add_argument("-l", "--language", default="en", help="OCR language code")
+    batch_parser.add_argument("--no-preprocess", action="store_true", help="Disable CV preprocessing")
+
+    # Evaluate subcommand
+    eval_parser = subparsers.add_parser("evaluate", help="Run ground-truth evaluation metrics")
+    eval_parser.add_argument("data_dir", nargs="?", default="data", help="Directory containing sample documents")
+    eval_parser.add_argument("-o", "--output", help="Save evaluation markdown report to file")
+
+    # Benchmark subcommand
+    bench_parser = subparsers.add_parser("benchmark", help="Run ablation study & robustness benchmarks")
+    bench_parser.add_argument("data_dir", nargs="?", default="data", help="Directory containing sample documents")
+    bench_parser.add_argument("-o", "--output", help="Save benchmark report to file")
+
+    # Serve subcommand
+    serve_parser = subparsers.add_parser("serve", help="Launch FastAPI REST microservice")
+    serve_parser.add_argument("--host", default="0.0.0.0", help="Host address")
+    serve_parser.add_argument("--port", type=int, default=8000, help="Port number")
+
+    # Demo subcommand
+    demo_parser = subparsers.add_parser("demo", help="Launch Streamlit interactive visual UI")
+    demo_parser.add_argument("--port", type=int, default=8501, help="Port number")
+
     return parser
 
 
-def main(argv: Optional[list] = None):
-    # Ensure UTF-8 console output on Windows
-    if hasattr(sys.stdout, "reconfigure"):
-        try:
-            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+def main(argv: Optional[list] = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    subcommands = {"predict", "batch", "evaluate", "benchmark", "serve", "demo"}
+    if argv and argv[0] not in subcommands and not argv[0].startswith("-"):
+        argv = ["predict"] + argv
+    elif not argv:
+        argv = ["--help"]
 
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.verbose:
-        logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    if args.command == "predict":
+        return cmd_predict(args)
+    elif args.command == "batch":
+        return cmd_batch(args)
+    elif args.command == "evaluate":
+        return cmd_evaluate(args)
+    elif args.command == "benchmark":
+        return cmd_benchmark(args)
+    elif args.command == "serve":
+        return cmd_serve(args)
+    elif args.command == "demo":
+        return cmd_demo(args)
     else:
-        logging.basicConfig(level=logging.WARNING, format="%(message)s")
-
-    input_path = args.input_file
-    if not os.path.exists(input_path):
-        print(f"Error: Input file not found: '{input_path}'", file=sys.stderr)
-        sys.exit(1)
-
-    print(BANNER_LINE)
-    print("DOCUMENT AI FIELD EXTRACTION")
-    print(BANNER_LINE)
-    print(f"\nInput: {input_path}\n")
-
-    # Load custom catalogs if provided
-    dealers, models = load_custom_config(args.config_file)
-
-    def progress_callback(msg: str, step: int, total: int):
-        print(f"[{step}/{total}] {msg}")
-
-    try:
-        pipeline = DocumentAIPipeline(
-            dealer_master=dealers,
-            model_master=models,
-            ocr_lang=args.language,
-        )
-
-        doc = pipeline.process(input_path, on_progress=progress_callback)
-
-        if args.output_file:
-            export_json_result(input_path, doc, args.output_file)
-
-        print_cli_summary(input_path, doc, output_path=args.output_file)
-
-    except Exception as e:
-        print(f"\nError processing document: {e}", file=sys.stderr)
-        if args.verbose:
-            import traceback
-
-            traceback.print_exc()
-        sys.exit(1)
+        parser.print_help()
+        return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
+

@@ -1,0 +1,13 @@
+{
+  "doc_id": "sample_02",
+  "dealer_name": "Swaraj Tractors Ltd.",
+  "model_name": "Swaraj 744 FE",
+  "horse_power": 48.0,
+  "asset_cost": 680000.0,
+  "invoice_number": "SW-78901",
+  "invoice_date": "20/01/2026",
+  "customer_name": "Suresh Patel",
+  "phone_number": "9123456780",
+  "has_signature": true,
+  "has_stamp": false
+}

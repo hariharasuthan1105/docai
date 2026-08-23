@@ -1,5 +1,5 @@
 """
-Thin wrapper around PaddleOCR with PDF, image, and text support.
+Enhanced PaddleOCR Engine with Preprocessing & Multi-page Geometry Tracking.
 """
 
 from __future__ import annotations
@@ -7,12 +7,17 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import numpy as np
 
 # Ensure stable execution on Windows CPU by avoiding oneDNN PIR instruction bug
 os.environ.setdefault("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", "0")
 os.environ.setdefault("FLAGS_use_mkldnn", "0")
 os.environ.setdefault("FLAGS_enable_pir_api", "0")
+
+from docai.preprocessing.image_enhancer import load_image, preprocess_document_image
+from docai.preprocessing.pdf_handler import render_pdf_to_images
 
 logger = logging.getLogger(__name__)
 
@@ -29,28 +34,33 @@ class OCRLine:
     text: str
     bbox: Tuple[float, float, float, float]  # x0, y0, x1, y1
     confidence: float
+    page: int = 1
 
 
 @dataclass
 class OCRResult:
     lines: List[OCRLine] = field(default_factory=list)
+    page_count: int = 1
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def full_text(self) -> str:
         return "\n".join(line.text for line in self.lines)
 
+    def get_page_lines(self, page_num: int) -> List[OCRLine]:
+        return [line for line in self.lines if line.page == page_num]
+
 
 class OCREngine:
     """
-    Usage:
-        engine = OCREngine(lang="en")
-        result = engine.extract_text("invoice.pdf")
+    Production-ready OCR engine with intelligent preprocessing and multi-page support.
     """
 
     def __init__(
         self,
         lang: str = "en",
         use_textline_orientation: bool = True,
+        enable_preprocessing: bool = True,
         use_angle_cls: Optional[bool] = None,
     ):
         if not _PADDLE_AVAILABLE:
@@ -58,7 +68,10 @@ class OCREngine:
                 "paddleocr is required for OCREngine. "
                 "Install with `pip install paddleocr paddlepaddle`."
             )
+        self.lang = lang
+        self.enable_preprocessing = enable_preprocessing
         orientation_flag = use_textline_orientation if use_angle_cls is None else use_angle_cls
+
         try:
             self._ocr = PaddleOCR(
                 use_textline_orientation=orientation_flag,
@@ -85,7 +98,7 @@ class OCREngine:
             except Exception:
                 return self._ocr.ocr(img_or_path, cls=True)
 
-    def _parse_raw_ocr(self, raw: Any) -> List[OCRLine]:
+    def _parse_raw_ocr(self, raw: Any, page: int = 1) -> List[OCRLine]:
         lines: List[OCRLine] = []
         if not raw:
             return lines
@@ -128,17 +141,17 @@ class OCREngine:
                         float(max(x_coords)),
                         float(max(y_coords)),
                     )
-                parsed.append(OCRLine(text=str(text), bbox=bbox, confidence=score))
+                parsed.append(OCRLine(text=str(text), bbox=bbox, confidence=score, page=page))
             return parsed
 
         if isinstance(raw, (list, tuple)):
-            for page in raw:
-                if not page:
+            for p_elem in raw:
+                if not p_elem:
                     continue
-                if isinstance(page, dict) or (hasattr(page, "get") and callable(getattr(page, "get"))):
-                    lines.extend(parse_dict_like(page))
-                elif isinstance(page, list):
-                    for detection in page:
+                if isinstance(p_elem, dict) or (hasattr(p_elem, "get") and callable(getattr(p_elem, "get"))):
+                    lines.extend(parse_dict_like(p_elem))
+                elif isinstance(p_elem, list):
+                    for detection in p_elem:
                         if isinstance(detection, (list, tuple)) and len(detection) == 2:
                             box, text_info = detection
                             if isinstance(text_info, (list, tuple)) and len(text_info) == 2:
@@ -158,7 +171,7 @@ class OCREngine:
                                     float(max(x_coords)),
                                     float(max(y_coords)),
                                 )
-                            lines.append(OCRLine(text=str(text), bbox=bbox, confidence=float(conf)))
+                            lines.append(OCRLine(text=str(text), bbox=bbox, confidence=float(conf), page=page))
         elif isinstance(raw, dict) or (hasattr(raw, "get") and callable(getattr(raw, "get"))):
             lines.extend(parse_dict_like(raw))
 
@@ -168,38 +181,54 @@ class OCREngine:
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"Input file not found: {input_path}")
 
-        # Check if text file (pre-extracted OCR text)
+        # Text file
         if input_path.lower().endswith(".txt"):
             with open(input_path, "r", encoding="utf-8") as f:
                 content = f.read()
             lines = [
-                OCRLine(text=line, bbox=(0.0, 0.0, 0.0, 0.0), confidence=1.0)
+                OCRLine(text=line, bbox=(0.0, 0.0, 0.0, 0.0), confidence=1.0, page=1)
                 for line in content.splitlines()
                 if line.strip()
             ]
-            return OCRResult(lines=lines)
+            return OCRResult(lines=lines, page_count=1, metadata={"source_type": "text"})
 
-        # Check if PDF
+        # Multi-page PDF
         if input_path.lower().endswith(".pdf"):
             try:
-                import numpy as np
-                import pypdfium2 as pdfium
+                pages = render_pdf_to_images(input_path)
+                all_lines: List[OCRLine] = []
+                preprocess_logs = []
 
-                pdf = pdfium.PdfDocument(input_path)
-                lines: List[OCRLine] = []
-                for page_idx in range(len(pdf)):
-                    page = pdf[page_idx]
-                    bitmap = page.render(scale=2.0)
-                    pil_image = bitmap.to_pil()
-                    img_np = np.array(pil_image)
-                    raw = self._call_ocr(img_np)
-                    lines.extend(self._parse_raw_ocr(raw))
-                return OCRResult(lines=lines)
+                for p_img in pages:
+                    img_to_ocr = p_img.image
+                    if self.enable_preprocessing:
+                        img_to_ocr, meta = preprocess_document_image(img_to_ocr)
+                        preprocess_logs.append(meta)
+
+                    raw = self._call_ocr(img_to_ocr)
+                    all_lines.extend(self._parse_raw_ocr(raw, page=p_img.page_number))
+
+                return OCRResult(
+                    lines=all_lines,
+                    page_count=len(pages),
+                    metadata={"source_type": "pdf", "pages": len(pages), "preprocessing": preprocess_logs},
+                )
             except Exception as e:
-                logger.warning("PDF rendering via pypdfium2 failed (%s), calling OCR directly.", e)
+                logger.warning("PDF rendering fallback due to: %s", e)
 
-        raw = self._call_ocr(input_path)
-        return OCRResult(lines=self._parse_raw_ocr(raw))
+        # Image file (PNG / JPG / TIFF)
+        img_np = load_image(input_path)
+        meta = {}
+        if self.enable_preprocessing:
+            img_np, meta = preprocess_document_image(img_np)
+
+        raw = self._call_ocr(img_np)
+        lines = self._parse_raw_ocr(raw, page=1)
+        return OCRResult(
+            lines=lines,
+            page_count=1,
+            metadata={"source_type": "image", "preprocessing": meta},
+        )
 
     def run(self, input_path: str) -> OCRResult:
         return self.extract_text(input_path)
@@ -214,7 +243,7 @@ class StubOCREngine:
 
     def extract_text(self, input_path: str) -> OCRResult:
         if self._canned_lines is not None:
-            return OCRResult(lines=self._canned_lines)
+            return OCRResult(lines=self._canned_lines, page_count=1)
 
         text = self._canned_text
         if text is None and os.path.exists(input_path):
@@ -225,11 +254,11 @@ class StubOCREngine:
                 text = ""
 
         lines = [
-            OCRLine(text=line, bbox=(0.0, 0.0, 0.0, 0.0), confidence=1.0)
+            OCRLine(text=line, bbox=(0.0, 0.0, 0.0, 0.0), confidence=1.0, page=1)
             for line in (text or "").splitlines()
             if line.strip()
         ]
-        return OCRResult(lines=lines)
+        return OCRResult(lines=lines, page_count=1)
 
     def run(self, input_path: str) -> OCRResult:
         return self.extract_text(input_path)

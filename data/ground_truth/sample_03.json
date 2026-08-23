@@ -1,0 +1,13 @@
+{
+  "doc_id": "sample_03",
+  "dealer_name": "John Deere India Pvt. Ltd.",
+  "model_name": "John Deere 5050 D",
+  "horse_power": 50.0,
+  "asset_cost": 790000.0,
+  "invoice_number": "JD/2026/88",
+  "invoice_date": "05/03/2026",
+  "customer_name": "Balwant Singh",
+  "phone_number": "9845012345",
+  "has_signature": false,
+  "has_stamp": true
+}

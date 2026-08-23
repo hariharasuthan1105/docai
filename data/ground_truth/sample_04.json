@@ -1,0 +1,13 @@
+{
+  "doc_id": "sample_04",
+  "dealer_name": "Escorts Kubota Ltd.",
+  "model_name": "Farmtrac 60",
+  "horse_power": 55.0,
+  "asset_cost": 720000.0,
+  "invoice_number": "EK-5541",
+  "invoice_date": "12/02/2026",
+  "customer_name": "Manpreet Kaur",
+  "phone_number": "9765432109",
+  "has_signature": true,
+  "has_stamp": true
+}

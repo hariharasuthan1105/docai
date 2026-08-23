@@ -1,0 +1,177 @@
+{
+  "document_id": "sample_01.png",
+  "document": "data/samples/sample_01.png",
+  "fields": {
+    "dealer_name": {
+      "value": "Mahindra & Mahindra Ltd.",
+      "confidence": 0.964,
+      "bbox": [
+        58.0,
+        93.0,
+        269.0,
+        106.0
+      ],
+      "source": "fuzzy_match",
+      "page": 1
+    },
+    "model_name": {
+      "value": "Arjun Novo 605 DI",
+      "confidence": 0.941,
+      "bbox": [
+        157.0,
+        400.0,
+        277.0,
+        413.0
+      ],
+      "source": "exact_match",
+      "page": 1
+    },
+    "horse_power": {
+      "value": 50.0,
+      "confidence": 0.95,
+      "bbox": [
+        597.0,
+        399.0,
+        637.0,
+        413.0
+      ],
+      "source": "regex",
+      "page": 1
+    },
+    "asset_cost": {
+      "value": 550000.0,
+      "confidence": 0.92,
+      "bbox": [
+        777.0,
+        618.0,
+        833.0,
+        632.0
+      ],
+      "source": "regex",
+      "page": 1
+    },
+    "invoice_number": {
+      "value": "INV-2026-001",
+      "confidence": 0.965,
+      "bbox": [
+        57.0,
+        199.0,
+        176.0,
+        212.0
+      ],
+      "source": "layout_kv",
+      "page": 1
+    },
+    "invoice_date": {
+      "value": "15/02/2026",
+      "confidence": 0.965,
+      "bbox": [
+        547.0,
+        199.0,
+        664.0,
+        212.0
+      ],
+      "source": "layout_kv",
+      "page": 1
+    },
+    "customer_name": {
+      "value": "Ramesh Kumar",
+      "confidence": 0.965,
+      "bbox": [
+        57.0,
+        239.0,
+        210.0,
+        252.0
+      ],
+      "source": "layout_kv",
+      "page": 1
+    },
+    "customer_address": {
+      "value": null,
+      "confidence": 0.0,
+      "bbox": null
+    },
+    "phone_number": {
+      "value": "9876543210",
+      "confidence": 0.965,
+      "bbox": [
+        57.0,
+        124.0,
+        155.0,
+        137.0
+      ],
+      "source": "layout_kv",
+      "page": 1
+    },
+    "registration_number": {
+      "value": null,
+      "confidence": 0.0,
+      "bbox": null
+    },
+    "serial_number": {
+      "value": "Description of Equipment/ Model",
+      "confidence": 0.8872,
+      "bbox": [
+        159.0,
+        324.0,
+        316.0,
+        337.0
+      ],
+      "source": "layout_kv",
+      "page": 1
+    },
+    "dealer_signature": {
+      "status": "detected",
+      "present": true,
+      "confidence": 0.7017,
+      "bbox": [
+        667.0,
+        1191.0,
+        844.0,
+        1330.0
+      ]
+    },
+    "dealer_stamp": {
+      "status": "detected",
+      "present": true,
+      "confidence": 0.8042,
+      "bbox": [
+        669.0,
+        1193.0,
+        842.0,
+        1328.0
+      ]
+    }
+  },
+  "validation": {
+    "overall_confidence": 0.9437,
+    "calibrated_confidence": null,
+    "decision": "AUTO_APPROVE",
+    "needs_human_review": false,
+    "review_reasons": []
+  },
+  "processing_time_ms": 35992.32,
+  "metadata": {
+    "ocr_lines_count": 19,
+    "page_count": 1,
+    "ocr_metadata": {
+      "source_type": "image",
+      "preprocessing": {
+        "original_shape": [
+          1400,
+          1000,
+          3
+        ],
+        "skew_angle_corrected": 0.0,
+        "orientation_angle_corrected": 0,
+        "clahe_applied": true,
+        "denoise_applied": true,
+        "final_shape": [
+          1400,
+          1000,
+          3
+        ]
+      }
+    }
+  }
+}

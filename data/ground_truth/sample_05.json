@@ -1,0 +1,13 @@
+{
+  "doc_id": "sample_05",
+  "dealer_name": "Sonalika Tractors Ltd.",
+  "model_name": "Sonalika Sikander RX 50",
+  "horse_power": 50.0,
+  "asset_cost": 640000.0,
+  "invoice_number": "SON-9921",
+  "invoice_date": "28/02/2026",
+  "customer_name": "Vikram Rathore",
+  "phone_number": "9811223344",
+  "has_signature": true,
+  "has_stamp": false
+}

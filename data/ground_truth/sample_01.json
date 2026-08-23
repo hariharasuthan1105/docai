@@ -1,0 +1,13 @@
+{
+  "doc_id": "sample_01",
+  "dealer_name": "Mahindra & Mahindra Ltd.",
+  "model_name": "Arjun Novo 605 DI",
+  "horse_power": 50.0,
+  "asset_cost": 550000.0,
+  "invoice_number": "INV-2026-001",
+  "invoice_date": "15/02/2026",
+  "customer_name": "Ramesh Kumar",
+  "phone_number": "9876543210",
+  "has_signature": true,
+  "has_stamp": true
+}
