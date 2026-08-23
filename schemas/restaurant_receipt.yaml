@@ -1,0 +1,402 @@
+document_type: "restaurant_receipt"
+title: "Restaurant Receipt / Food Tax Invoice"
+description: "POS bills, restaurant dining receipts, food orders, and cafe invoices"
+version: "1.0"
+
+classification:
+  title_keywords:
+    - "restaurant"
+    - "cafe"
+    - "dining"
+    - "food"
+    - "tax invoice (receipt)"
+    - "receipt"
+    - "table no"
+  keywords:
+    - "restaurant"
+    - "table"
+    - "cashier"
+    - "order no"
+    - "subtotal"
+    - "cgst"
+    - "sgst"
+    - "good food"
+    - "unit price"
+    - "amount (₹)"
+    - "amount in words"
+    - "payment mode"
+    - "upi"
+    - "thank you! visit again"
+  required_anchors:
+    - "invoice no"
+    - "table"
+  table_indicators:
+    - "item name"
+    - "qty"
+    - "unit price"
+  min_score_threshold: 0.30
+
+sections:
+  - "merchant"
+  - "metadata"
+  - "totals"
+  - "payment"
+
+fields:
+  # --- Merchant Section ---
+  merchant_name:
+    section: "merchant"
+    aliases:
+      - "restaurant name"
+      - "store name"
+    type: "string"
+    required: false
+    extraction_strategies: ["position_header", "key_value"]
+    confidence_weight: 1.0
+
+
+  merchant_tagline:
+    section: "merchant"
+    aliases:
+      - "tagline"
+    type: "string"
+    required: false
+    extraction_strategies: ["position_header"]
+    confidence_weight: 0.8
+
+  merchant_address:
+    section: "merchant"
+    aliases:
+      - "restaurant address"
+      - "address"
+      - "location"
+    type: "string"
+    required: false
+    extraction_strategies: ["position_header", "key_value"]
+    confidence_weight: 0.9
+
+  merchant_phone:
+    section: "merchant"
+    aliases:
+      - "phone"
+      - "tel"
+      - "mobile"
+      - "contact"
+    type: "phone"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:phone|tel|mobile)\\s*[:\\-]?\\s*([0-9\\-\\+]{8,15})"
+    confidence_weight: 0.9
+
+  # --- Metadata Section ---
+  invoice_number:
+    section: "metadata"
+    aliases:
+      - "invoice no"
+      - "invoice #"
+      - "bill no"
+      - "receipt no"
+      - "inv no"
+    type: "string"
+    required: true
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:invoice\\s*no\\.?|bill\\s*no\\.?|inv\\s*no\\.?)\\s*[:\\-]?\\s*([A-Za-z0-9\\-\\/]+)"
+    confidence_weight: 1.0
+
+  invoice_date:
+    section: "metadata"
+    aliases:
+      - "date"
+      - "bill date"
+      - "invoice date"
+      - "dated"
+    type: "date"
+    required: true
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:date|dated|invoice\\s*date)\\s*[:\\-]?\\s*(\\d{1,2}[\\/\\-\\.]\\d{1,2}[\\/\\-\\.]\\d{2,4})"
+    confidence_weight: 1.0
+
+  invoice_time:
+    section: "metadata"
+    aliases:
+      - "time"
+      - "bill time"
+    type: "time"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:time)\\s*[:\\-]?\\s*(\\d{1,2}:\\d{2}(?:\\s*[apAP][mM])?)"
+    confidence_weight: 0.9
+
+  order_number:
+    section: "metadata"
+    aliases:
+      - "order no"
+      - "order #"
+      - "order"
+    type: "string"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:order\\s*no\\.?|order\\s*#)\\s*[:\\-]?\\s*([A-Za-z0-9\\-]+)"
+    confidence_weight: 0.9
+
+  table_number:
+    section: "metadata"
+    aliases:
+      - "table no"
+      - "table #"
+      - "table"
+      - "tbl"
+    type: "string"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:table\\s*no\\.?|table\\s*#|table)\\s*[:\\-]?\\s*([A-Za-z0-9\\-]+)"
+    confidence_weight: 0.9
+
+  cashier:
+    section: "metadata"
+    aliases:
+      - "cashier"
+      - "server"
+      - "biller"
+      - "steward"
+    type: "string"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:cashier|server|biller|steward)\\s*[:\\-]?\\s*([A-Za-z\\s]+)"
+    confidence_weight: 0.85
+
+  # --- Totals Section ---
+  subtotal:
+    section: "totals"
+    aliases:
+      - "subtotal"
+      - "sub total"
+      - "item total"
+      - "gross amount"
+    type: "currency"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:subtotal|sub\\s*total)\\s*[:\\-]?\\s*(?:rs\\.?|inr|₹)?\\s*([\\d,]+(?:\\.\\d{1,2})?)"
+    confidence_weight: 1.0
+
+  discount_percentage:
+    section: "totals"
+    aliases:
+      - "discount (%)"
+      - "discount %"
+    type: "number"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "discount\\s*\\(([\\d\\.]+)%\\)"
+    confidence_weight: 0.85
+
+  discount_amount:
+    section: "totals"
+    aliases:
+      - "discount"
+      - "less discount"
+      - "discount amount"
+    type: "currency"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:discount|less\\s*discount)\\s*(?:\\([^)]*\\))?\\s*[:\\-]?\\s*(?:rs\\.?|inr|₹)?\\s*\\-?\\s*([\\d,]+(?:\\.\\d{1,2})?)"
+    confidence_weight: 0.9
+
+  taxable_amount:
+    section: "totals"
+    aliases:
+      - "taxable amount"
+      - "taxable value"
+      - "net amount"
+    type: "currency"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:taxable\\s*amount|taxable\\s*value)\\s*[:\\-]?\\s*(?:rs\\.?|inr|₹)?\\s*([\\d,]+(?:\\.\\d{1,2})?)"
+    confidence_weight: 0.95
+
+  cgst_rate_pct:
+    section: "totals"
+    aliases:
+      - "cgst (%)"
+      - "cgst %"
+    type: "number"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "cgst\\s*\\(([\\d\\.]+)%\\)"
+    confidence_weight: 0.85
+
+  cgst_amount:
+    section: "totals"
+    aliases:
+      - "cgst"
+      - "cgst amount"
+    type: "currency"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "cgst\\s*(?:\\([^)]*\\))?\\s*[:\\-]?\\s*(?:rs\\.?|inr|₹)?\\s*([\\d,]+(?:\\.\\d{1,2})?)"
+    confidence_weight: 0.9
+
+  sgst_rate_pct:
+    section: "totals"
+    aliases:
+      - "sgst (%)"
+      - "sgst %"
+    type: "number"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "sgst\\s*\\(([\\d\\.]+)%\\)"
+    confidence_weight: 0.85
+
+  sgst_amount:
+    section: "totals"
+    aliases:
+      - "sgst"
+      - "sgst amount"
+    type: "currency"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "sgst\\s*(?:\\([^)]*\\))?\\s*[:\\-]?\\s*(?:rs\\.?|inr|₹)?\\s*([\\d,]+(?:\\.\\d{1,2})?)"
+    confidence_weight: 0.9
+
+  grand_total:
+    section: "totals"
+    aliases:
+      - "grand total"
+      - "total amount"
+      - "invoice total"
+      - "total (₹)"
+      - "total"
+      - "amount payable"
+      - "net payable"
+    type: "currency"
+    required: true
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:grand\\s*total|net\\s*payable|amount\\s*payable)\\s*[:\\-]?\\s*(?:rs\\.?|inr|₹)?\\s*([\\d,]+(?:\\.\\d{1,2})?)"
+    confidence_weight: 1.0
+
+  amount_in_words:
+    section: "totals"
+    aliases:
+      - "amount in words"
+      - "in words"
+      - "rupees in words"
+    type: "string"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:amount\\s*in\\s*words|in\\s*words)\\s*[:\\-]?\\s*(.+)"
+    confidence_weight: 0.85
+
+  # --- Payment Section ---
+  payment_mode:
+    section: "payment"
+    aliases:
+      - "payment mode"
+      - "mode of payment"
+      - "payment type"
+      - "pay mode"
+    type: "string"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:payment\\s*mode|pay\\s*mode)\\s*[:\\-]?\\s*([A-Za-z0-9\\s]+)"
+    confidence_weight: 0.9
+
+  upi_ref_no:
+    section: "payment"
+    aliases:
+      - "upi ref no"
+      - "upi ref"
+      - "ref no"
+      - "txn id"
+      - "transaction id"
+    type: "string"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:upi\\s*ref\\s*(?:no\\.?)?|txn\\s*id)\\s*[:\\-]?\\s*([A-Za-z0-9]+)"
+    confidence_weight: 0.9
+
+  payment_status:
+    section: "payment"
+    aliases:
+      - "payment status"
+      - "status"
+    type: "string"
+    required: false
+    extraction_strategies: ["key_value", "regex"]
+    regex_patterns:
+      - "(?:payment\\s*status|status)\\s*[:\\-]?\\s*([A-Za-z]+)"
+    confidence_weight: 0.9
+
+tables:
+  line_items:
+    name: "line_items"
+    header_keywords:
+      - "s.no"
+      - "sno"
+      - "item name"
+      - "item"
+      - "description"
+      - "qty"
+      - "quantity"
+      - "unit price"
+      - "rate"
+      - "price"
+      - "amount"
+      - "amount (₹)"
+      - "total"
+    columns:
+      sno:
+        aliases: ["s.no.", "s.no", "sno", "sl no", "item #"]
+        type: "number"
+      item:
+        aliases: ["item name", "item", "description", "item description", "particulars"]
+        type: "string"
+        required: true
+      qty:
+        aliases: ["qty", "quantity", "qnty"]
+        type: "number"
+        required: true
+      unit_price:
+        aliases: ["unit price", "rate", "price", "rate (₹)"]
+        type: "currency"
+        required: true
+      amount:
+        aliases: ["amount", "amount (₹)", "total", "total (₹)"]
+        type: "currency"
+        required: true
+    row_formula: "qty * unit_price == amount"
+    min_rows: 1
+
+validations:
+  - name: "table_line_item_math"
+    rule_type: "table_row_check"
+    expression: "qty * unit_price == amount"
+    severity: "warning"
+    message: "Line item calculation mismatch: qty * unit_price does not equal amount."
+
+  - name: "totals_arithmetic_balance"
+    rule_type: "arithmetic_balance"
+    expression: "subtotal - discount_amount + cgst_amount + sgst_amount == grand_total"
+    severity: "warning"
+    message: "Totals balance check mismatch: subtotal - discount + taxes does not equal grand_total."
+
+auto_approve_threshold: 0.88
+review_threshold: 0.70

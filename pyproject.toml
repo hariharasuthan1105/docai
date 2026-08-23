@@ -19,6 +19,6 @@ dependencies = [
 [project.scripts]
 docai = "docai.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["docai*"]
+[tool.setuptools]
+package-dir = {"docai" = "."}
+

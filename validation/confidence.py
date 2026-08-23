@@ -206,3 +206,12 @@ class ConfidenceCalibrator:
                 ece += (bin_size / n_samples) * abs(bin_acc - bin_conf)
 
         return round(float(ece), 4)
+
+
+def compute_brier_score(y_true: np.ndarray, y_prob: np.ndarray) -> float:
+    return ConfidenceCalibrator.compute_brier_score(y_true, y_prob)
+
+
+def compute_ece(y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10) -> float:
+    return ConfidenceCalibrator.compute_ece(y_true, y_prob, n_bins=n_bins)
+

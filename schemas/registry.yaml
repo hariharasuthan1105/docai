@@ -1,0 +1,18 @@
+# Schema Registry Definition
+version: "1.0"
+
+document_types:
+  restaurant_receipt:
+    schema: "restaurant_receipt.yaml"
+    description: "Restaurant dining receipts, cafe orders, food invoices, and POS bills"
+    priority: 10
+
+  tractor_invoice:
+    schema: "tractor_invoice.yaml"
+    description: "Agricultural tractor and heavy equipment commercial tax invoices"
+    priority: 10
+
+  generic:
+    schema: "generic_document.yaml"
+    description: "Fallback schema for unclassified or generic document types"
+    priority: 1

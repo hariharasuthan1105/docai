@@ -42,10 +42,28 @@ class OCRResult:
     lines: List[OCRLine] = field(default_factory=list)
     page_count: int = 1
     metadata: Dict[str, Any] = field(default_factory=dict)
+    full_text_override: Optional[str] = None
+    confidence: float = 1.0
 
     @property
     def full_text(self) -> str:
+        if self.full_text_override is not None:
+            return self.full_text_override
         return "\n".join(line.text for line in self.lines)
+
+    def __init__(
+        self,
+        lines: Optional[List[OCRLine]] = None,
+        page_count: int = 1,
+        metadata: Optional[Dict[str, Any]] = None,
+        full_text: Optional[str] = None,
+        confidence: float = 1.0,
+    ):
+        self.lines = lines if lines is not None else []
+        self.page_count = page_count
+        self.metadata = metadata if metadata is not None else {}
+        self.full_text_override = full_text
+        self.confidence = confidence
 
     def get_page_lines(self, page_num: int) -> List[OCRLine]:
         return [line for line in self.lines if line.page == page_num]

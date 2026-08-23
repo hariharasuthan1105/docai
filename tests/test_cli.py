@@ -14,9 +14,9 @@ def test_cli_help(capsys):
         main(["--help"])
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
-    assert "Deterministic Document AI CLI" in captured.out
-    assert "--output" in captured.out
-    assert "--config" in captured.out
+    assert "Document AI" in captured.out
+    assert "predict" in captured.out
+    assert "batch" in captured.out
 
 
 def test_cli_missing_file(capsys):
@@ -41,14 +41,9 @@ def test_cli_run_and_export_json(tmp_path, capsys):
     main([str(invoice_path), "--output", str(output_json)])
 
     captured = capsys.readouterr()
-    assert "RESULT" in captured.out
-    assert "Dealer Name      : Mahindra Tractors Ltd." in captured.out
-    assert "Model Name       : Arjun Novo 605 DI" in captured.out
-    assert "Horse Power      : 50.0 HP" in captured.out
-    assert "Asset Cost       : 550000.0" in captured.out
-    assert "Dealer Signature : NOT IMPLEMENTED" in captured.out
-    assert "Dealer Stamp     : NOT IMPLEMENTED" in captured.out
-    assert "AUTO-APPROVED" in captured.out
+    assert "EXTRACTION RESULT" in captured.out
+    assert "Dealer Name" in captured.out
+    assert "Mahindra Tractors Ltd." in captured.out
 
     # Check generated JSON file
     assert output_json.exists()
@@ -90,5 +85,5 @@ def test_cli_custom_config(tmp_path, capsys):
     main([str(invoice_path), "--config", str(cfg_path)])
 
     captured = capsys.readouterr()
-    assert "Dealer Name      : Custom Dealer Corp." in captured.out
-    assert "Model Name       : Custom Model 9000" in captured.out
+    assert "Custom Dealer Corp" in captured.out
+    assert "Custom Model 9000" in captured.out

@@ -1,8 +1,8 @@
 """
-Comprehensive Production CLI for Document AI.
+Comprehensive Production CLI for Multi-Document AI.
 
 Subcommands:
-- predict: Process single document (PDF, image, text)
+- predict: Process any single document (restaurant receipt, tractor invoice, generic PDF/image)
 - batch: Process a directory of documents
 - evaluate: Run ground-truth evaluation & metrics report
 - benchmark: Run component ablation study & robustness benchmarks
@@ -20,6 +20,19 @@ import sys
 import time
 from typing import Optional
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
 _curr_dir = os.path.dirname(os.path.abspath(__file__))
 _parent_dir = os.path.dirname(_curr_dir)
 for _p in [_parent_dir, _curr_dir]:
@@ -34,6 +47,7 @@ try:
     from docai.evaluation.robustness import format_robustness_markdown, run_robustness_benchmark
     from docai.models.extraction_schema import FinalDocument, ReviewDecision
     from docai.pipeline import DocumentAIPipeline
+    from docai.schemas.schema_loader import get_schema_registry
 except ImportError:
     from config import load_custom_config
     from evaluation.ablation import format_ablation_markdown, run_ablation_study
@@ -42,20 +56,22 @@ except ImportError:
     from evaluation.robustness import format_robustness_markdown, run_robustness_benchmark
     from models.extraction_schema import FinalDocument, ReviewDecision
     from pipeline import DocumentAIPipeline
+    from schemas.schema_loader import get_schema_registry
 
 BANNER_LINE = "=" * 60
 
 
 def format_field_display(name: str, field_obj, unit: str = "") -> str:
     """Format an extracted field for terminal presentation."""
-    if field_obj.is_present():
+    if field_obj is not None and getattr(field_obj, "is_present", lambda: False)():
         val_str = f"{field_obj.value} {unit}".strip() if unit else str(field_obj.value)
         conf_str = f"{field_obj.confidence:.2f}"
-    else:
-        val_str = "(not found)"
-        conf_str = "0.00"
-
-    return f"{name:<17}: {val_str}\nConfidence       : {conf_str}\n"
+        return f"{name:<19}: {val_str:<32} (conf: {conf_str})"
+    elif field_obj is not None and getattr(field_obj, "value", None) is not None:
+        val_str = f"{field_obj.value} {unit}".strip() if unit else str(field_obj.value)
+        conf_str = f"{getattr(field_obj, 'confidence', 1.0):.2f}"
+        return f"{name:<19}: {val_str:<32} (conf: {conf_str})"
+    return f"{name:<19}: (not found)"
 
 
 def format_visual_mark(name: str, mark_obj) -> str:
@@ -67,47 +83,118 @@ def format_visual_mark(name: str, mark_obj) -> str:
     else:
         status_str = f"NOT DETECTED (conf: {mark_obj.confidence:.2f})"
 
-    return f"{name:<17}: {status_str}"
+    return f"{name:<19}: {status_str}"
 
 
 def display_results(final_doc: FinalDocument) -> None:
-    """Print clean formatted card to terminal."""
+    """Print clean formatted multi-document result card to terminal."""
     print("\n" + BANNER_LINE)
-    print("RESULT")
+    print("DOCUMENT AI EXTRACTION RESULT")
     print(BANNER_LINE + "\n")
 
-    print(format_field_display("Dealer Name", final_doc.dealer_name))
-    print(format_field_display("Model Name", final_doc.model_name))
-    print(format_field_display("Horse Power", final_doc.horse_power, unit="HP"))
-    print(format_field_display("Asset Cost", final_doc.asset_cost))
+    dtype = final_doc.document_type
+    print(f"Document Type      : {dtype.replace('_', ' ').title()} (conf: {final_doc.document_type_confidence:.2f})\n")
 
-    if final_doc.invoice_number.is_present():
-        print(format_field_display("Invoice Number", final_doc.invoice_number))
-    if final_doc.invoice_date.is_present():
-        print(format_field_display("Invoice Date", final_doc.invoice_date))
-    if final_doc.customer_name.is_present():
-        print(format_field_display("Customer Name", final_doc.customer_name))
-    if final_doc.phone_number.is_present():
-        print(format_field_display("Phone Number", final_doc.phone_number))
+    all_fields = final_doc.get_all_fields()
 
-    print(format_visual_mark("Dealer Signature", final_doc.dealer_signature))
-    print(format_visual_mark("Dealer Stamp", final_doc.dealer_stamp))
+    if dtype == "restaurant_receipt":
+        # --- Merchant ---
+        print("[ MERCHANT DETAILS ]")
+        if "merchant_name" in all_fields:
+            print(format_field_display("Establishment", all_fields["merchant_name"]))
+        if "merchant_tagline" in all_fields and all_fields["merchant_tagline"].is_present():
+            print(format_field_display("Tagline", all_fields["merchant_tagline"]))
+        if "merchant_address" in all_fields and all_fields["merchant_address"].is_present():
+            print(format_field_display("Address", all_fields["merchant_address"]))
+        if "merchant_phone" in all_fields and all_fields["merchant_phone"].is_present():
+            print(format_field_display("Phone", all_fields["merchant_phone"]))
+
+        # --- Metadata ---
+        print("\n[ ORDER METADATA ]")
+        for k in ["invoice_number", "invoice_date", "invoice_time", "order_number", "table_number", "cashier"]:
+            if k in all_fields and all_fields[k].is_present():
+                lbl = k.replace("_", " ").title()
+                print(format_field_display(lbl, all_fields[k]))
+
+        # --- Tables (Line Items) ---
+        for tab in final_doc.tables:
+            print(f"\n[ {tab.name.upper()} ({len(tab.rows)} items) ]")
+            print(f"  {'S.No':<5} {'Item Name':<28} {'Qty':<5} {'Unit Price':<12} {'Amount':<10}")
+            print("  " + "-" * 64)
+            for r in tab.rows:
+                sno = str(r.get("sno", ""))
+                item = str(r.get("item", ""))[:26]
+                qty = str(r.get("qty", ""))
+                uprice = f"₹{r.get('unit_price', ''):.2f}" if isinstance(r.get('unit_price'), (int, float)) else str(r.get('unit_price', ''))
+                amt = f"₹{r.get('amount', ''):.2f}" if isinstance(r.get('amount'), (int, float)) else str(r.get('amount', ''))
+                print(f"  {sno:<5} {item:<28} {qty:<5} {uprice:<12} {amt:<10}")
+
+        # --- Totals ---
+        print("\n[ FINANCIAL TOTALS & TAXES ]")
+        for k in ["subtotal", "discount_percentage", "discount_amount", "taxable_amount", "cgst_rate_pct", "cgst_amount", "sgst_rate_pct", "sgst_amount", "grand_total", "amount_in_words"]:
+            if k in all_fields and all_fields[k].is_present():
+                lbl = k.replace("_", " ").title()
+                unit = "Rs." if "amount" in k or "total" in k else ("%" if "rate" in k or "pct" in k or "percentage" in k else "")
+                print(format_field_display(lbl, all_fields[k], unit=unit))
+
+        # --- Payment ---
+        print("\n[ PAYMENT INFO ]")
+        for k in ["payment_mode", "upi_ref_no", "payment_status"]:
+            if k in all_fields and all_fields[k].is_present():
+                lbl = k.replace("_", " ").title()
+                print(format_field_display(lbl, all_fields[k]))
+
+    elif dtype == "tractor_invoice":
+        # --- Tractor Invoice View ---
+        print("[ EQUIPMENT & FINANCING ]")
+        print(format_field_display("Dealer Name", final_doc.dealer_name))
+        print(format_field_display("Model Name", final_doc.model_name))
+        print(format_field_display("Horse Power", final_doc.horse_power, unit="HP"))
+        print(format_field_display("Asset Cost", final_doc.asset_cost, unit="Rs."))
+
+
+        print("\n[ DOCUMENT METADATA ]")
+        if final_doc.invoice_number.is_present():
+            print(format_field_display("Invoice Number", final_doc.invoice_number))
+        if final_doc.invoice_date.is_present():
+            print(format_field_display("Invoice Date", final_doc.invoice_date))
+        if final_doc.customer_name.is_present():
+            print(format_field_display("Customer Name", final_doc.customer_name))
+        if final_doc.phone_number.is_present():
+            print(format_field_display("Phone Number", final_doc.phone_number))
+
+        print("\n[ VISUAL MARKS ]")
+        print(format_visual_mark("Dealer Signature", final_doc.dealer_signature))
+        print(format_visual_mark("Dealer Stamp", final_doc.dealer_stamp))
+
+    else:
+        # --- Generic Unknown Document View ---
+        print("[ DISCOVERED KEY-VALUES ]")
+        for k, fval in all_fields.items():
+            if fval.is_present():
+                lbl = k.replace("_", " ").title()
+                print(format_field_display(lbl, fval))
+
+        for tab in final_doc.tables:
+            print(f"\n[ DETECTED TABLE: {tab.name.upper()} ({len(tab.rows)} rows) ]")
+            for r in tab.rows:
+                print("  " + str(r))
 
     print("\n" + BANNER_LINE)
-    print(f"Overall Score    : {final_doc.overall_confidence:.4f}")
+    print(f"Overall Confidence : {final_doc.overall_confidence:.4f}")
     if final_doc.decision == ReviewDecision.AUTO_APPROVE:
-        print("Decision         : AUTO-APPROVED")
+        print("Review Decision    : AUTO-APPROVED")
     elif final_doc.decision == ReviewDecision.REVIEW:
-        print("Decision         : REVIEW REQUIRED")
+        print("Review Decision    : REVIEW REQUIRED")
     else:
-        print("Decision         : MANUAL REVIEW REQUIRED")
+        print("Review Decision    : MANUAL REVIEW REQUIRED")
 
     if final_doc.needs_human_review and final_doc.review_reasons:
-        print("\nReview Reasons:")
+        print("\nReview Reasons / Audit Trail:")
         for r in final_doc.review_reasons:
             print(f"  • {r}")
 
-    print(f"Processing Time  : {final_doc.processing_time_ms:.1f} ms")
+    print(f"Processing Time    : {final_doc.processing_time_ms:.1f} ms")
     print(BANNER_LINE + "\n")
 
 
@@ -136,6 +223,7 @@ def cmd_predict(args: argparse.Namespace) -> int:
     final_doc = pipeline.process(
         input_file,
         document_id=os.path.basename(input_file),
+        document_type=getattr(args, "schema", None),
         on_progress=print_progress if not args.quiet else None,
     )
 
@@ -183,12 +271,12 @@ def cmd_batch(args: argparse.Namespace) -> int:
     for fpath in files:
         fname = os.path.basename(fpath)
         print(f"Processing {fname}...")
-        res = pipeline.process(fpath, document_id=fname)
+        res = pipeline.process(fpath, document_id=fname, document_type=getattr(args, "schema", None))
         if args.output_dir:
             out_file = os.path.join(args.output_dir, f"{os.path.splitext(fname)[0]}_result.json")
             with open(out_file, "w", encoding="utf-8") as fp:
                 json.dump(res.to_legacy_dict(), fp, indent=2, ensure_ascii=False)
-        print(f"  -> Decision: {res.decision.value} (Score: {res.overall_confidence:.2f})")
+        print(f"  -> Type: {res.document_type} | Decision: {res.decision.value} (Score: {res.overall_confidence:.2f})")
 
     print("\n[OK] Batch processing complete.\n")
     return 0
@@ -243,106 +331,105 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
-    import uvicorn
-    from docai.api.app import create_app
+    try:
+        import uvicorn
+        from docai.api.app import create_app
+    except ImportError:
+        print("Error: FastAPI or Uvicorn not installed. Run: pip install -r requirements.txt", file=sys.stderr)
+        return 1
 
-    print(f"\nStarting Document AI FastAPI REST Service on {args.host}:{args.port}...")
     app = create_app()
-    uvicorn.run(app, host=args.host, port=args.port)
+    print(f"\nStarting Document AI REST API service on http://{args.host}:{args.port}...\n")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
 
 
 def cmd_demo(args: argparse.Namespace) -> int:
-    demo_path = os.path.join(os.path.dirname(__file__), "demo", "app.py")
-    print(f"\nLaunching Streamlit Dashboard on port {args.port}...")
     import subprocess
-    cmd = [sys.executable, "-m", "streamlit", "run", demo_path, "--server.port", str(args.port)]
-    return subprocess.call(cmd)
+    demo_file = os.path.join(os.path.dirname(__file__), "demo", "app.py")
+    if not os.path.exists(demo_file):
+        print(f"Error: Demo file not found at {demo_file}", file=sys.stderr)
+        return 1
+
+    print(f"\nLaunching Streamlit Visual Review UI on port {args.port}...\n")
+    cmd = [sys.executable, "-m", "streamlit", "run", demo_file, "--server.port", str(args.port)]
+    subprocess.run(cmd)
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="docai",
-        description="Deterministic Document AI CLI (PaddleOCR + Regex + Fuzzy Matching)",
+        description="Document AI — Production Multi-Document Field Extraction Engine",
     )
+    subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
-    parser.add_argument("-o", "--output", help="Path to write output JSON")
-    parser.add_argument("-c", "--config", help="Path to custom catalog JSON")
-    parser.add_argument("-l", "--language", default="en", help="OCR language code (en, hi, gu)")
-    parser.add_argument("--no-preprocess", action="store_true", help="Disable CV preprocessing")
-    parser.add_argument("-q", "--quiet", action="store_true", help="Quiet mode")
+    # 1. predict
+    p_pred = subparsers.add_parser("predict", help="Extract fields from a document")
+    p_pred.add_argument("input_file", help="Path to input PDF, image, or text file")
+    p_pred.add_argument("--schema", default=None, help="Force specific schema (restaurant_receipt, tractor_invoice, generic)")
+    p_pred.add_argument("--output", "-o", default=None, help="Save structured JSON output to file")
+    p_pred.add_argument("--config", "-c", default=None, help="Path to custom JSON config with master lists")
+    p_pred.add_argument("--language", "-l", default="en", help="PaddleOCR language code (default: en)")
+    p_pred.add_argument("--no-preprocess", action="store_true", help="Disable computer vision deskew/contrast enhancement")
+    p_pred.add_argument("--quiet", "-q", action="store_true", help="Suppress progress logging")
 
-    subparsers = parser.add_subparsers(dest="command")
+    # 2. batch
+    p_batch = subparsers.add_parser("batch", help="Batch extract fields from directory of documents")
+    p_batch.add_argument("input_dir", help="Directory containing documents")
+    p_batch.add_argument("--schema", default=None, help="Force specific schema")
+    p_batch.add_argument("--output-dir", "-o", default=None, help="Directory to save JSON results")
+    p_batch.add_argument("--config", "-c", default=None, help="Path to custom JSON config with master lists")
+    p_batch.add_argument("--language", "-l", default="en", help="PaddleOCR language code")
+    p_batch.add_argument("--no-preprocess", action="store_true", help="Disable preprocessing")
 
-    # Predict subcommand
-    pred_parser = subparsers.add_parser("predict", help="Process a single document file")
-    pred_parser.add_argument("input_file", help="Path to PDF, PNG, JPG, or TXT document")
-    pred_parser.add_argument("-o", "--output", help="Save structured JSON result to file")
-    pred_parser.add_argument("-c", "--config", help="Custom dealer/model catalog JSON")
-    pred_parser.add_argument("-l", "--language", default="en", help="OCR language code (en, hi, gu)")
-    pred_parser.add_argument("--no-preprocess", action="store_true", help="Disable CV preprocessing")
-    pred_parser.add_argument("-q", "--quiet", action="store_true", help="Suppress progress output")
+    # 3. evaluate
+    p_eval = subparsers.add_parser("evaluate", help="Run ground truth evaluation metrics")
+    p_eval.add_argument("data_dir", nargs="?", default="data", help="Directory with samples/ and ground_truth/")
+    p_eval.add_argument("--output", "-o", default=None, help="Path to save evaluation markdown report")
 
-    # Batch subcommand
-    batch_parser = subparsers.add_parser("batch", help="Process a directory of documents")
-    batch_parser.add_argument("input_dir", help="Path to folder containing documents")
-    batch_parser.add_argument("-o", "--output-dir", help="Directory to save JSON results")
-    batch_parser.add_argument("-c", "--config", help="Custom catalog JSON")
-    batch_parser.add_argument("-l", "--language", default="en", help="OCR language code")
-    batch_parser.add_argument("--no-preprocess", action="store_true", help="Disable CV preprocessing")
+    # 4. benchmark
+    p_bench = subparsers.add_parser("benchmark", help="Run ablation study and robustness degradation benchmarks")
+    p_bench.add_argument("data_dir", nargs="?", default="data", help="Directory with evaluation samples")
+    p_bench.add_argument("--output", "-o", default=None, help="Path to save benchmark report")
 
-    # Evaluate subcommand
-    eval_parser = subparsers.add_parser("evaluate", help="Run ground-truth evaluation metrics")
-    eval_parser.add_argument("data_dir", nargs="?", default="data", help="Directory containing sample documents")
-    eval_parser.add_argument("-o", "--output", help="Save evaluation markdown report to file")
+    # 5. serve
+    p_serve = subparsers.add_parser("serve", help="Launch FastAPI REST service")
+    p_serve.add_argument("--host", default="0.0.0.0", help="Host interface (default: 0.0.0.0)")
+    p_serve.add_argument("--port", type=int, default=8000, help="Port (default: 8000)")
 
-    # Benchmark subcommand
-    bench_parser = subparsers.add_parser("benchmark", help="Run ablation study & robustness benchmarks")
-    bench_parser.add_argument("data_dir", nargs="?", default="data", help="Directory containing sample documents")
-    bench_parser.add_argument("-o", "--output", help="Save benchmark report to file")
-
-    # Serve subcommand
-    serve_parser = subparsers.add_parser("serve", help="Launch FastAPI REST microservice")
-    serve_parser.add_argument("--host", default="0.0.0.0", help="Host address")
-    serve_parser.add_argument("--port", type=int, default=8000, help="Port number")
-
-    # Demo subcommand
-    demo_parser = subparsers.add_parser("demo", help="Launch Streamlit interactive visual UI")
-    demo_parser.add_argument("--port", type=int, default=8501, help="Port number")
+    # 6. demo
+    p_demo = subparsers.add_parser("demo", help="Launch Streamlit visual review UI")
+    p_demo.add_argument("--port", type=int, default=8501, help="Port (default: 8501)")
 
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
-    if argv is None:
-        argv = sys.argv[1:]
-
-    subcommands = {"predict", "batch", "evaluate", "benchmark", "serve", "demo"}
-    if argv and argv[0] not in subcommands and not argv[0].startswith("-"):
-        argv = ["predict"] + argv
-    elif not argv:
-        argv = ["--help"]
-
+def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
 
-    if args.command == "predict":
-        return cmd_predict(args)
-    elif args.command == "batch":
-        return cmd_batch(args)
-    elif args.command == "evaluate":
-        return cmd_evaluate(args)
-    elif args.command == "benchmark":
-        return cmd_benchmark(args)
-    elif args.command == "serve":
-        return cmd_serve(args)
-    elif args.command == "demo":
-        return cmd_demo(args)
-    else:
+    # Backward compatibility: default to predict if positional file passed
+    raw_args = list(argv) if argv is not None else list(sys.argv[1:])
+    if raw_args and raw_args[0] not in ["predict", "batch", "evaluate", "benchmark", "serve", "demo", "-h", "--help"]:
+        raw_args.insert(0, "predict")
+
+    args = parser.parse_args(raw_args)
+
+    if not args.command:
         parser.print_help()
-        return 0
+        return 1
+
+    handlers = {
+        "predict": cmd_predict,
+        "batch": cmd_batch,
+        "evaluate": cmd_evaluate,
+        "benchmark": cmd_benchmark,
+        "serve": cmd_serve,
+        "demo": cmd_demo,
+    }
+
+    return handlers[args.command](args)
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

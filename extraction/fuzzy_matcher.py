@@ -58,7 +58,15 @@ class EntityMatcher:
         self._norm_dealer_master = [normalize_text_for_matching(d) for d in dealer_master]
         self._norm_model_master = [normalize_text_for_matching(m) for m in model_master]
 
+    def calculate_similarity(self, s1: str, s2: str) -> float:
+        """Compute fuzzy similarity ratio between two strings in [0.0, 1.0]."""
+        s1_norm = normalize_text_for_matching(s1)
+        s2_norm = normalize_text_for_matching(s2)
+        score = fuzz.token_sort_ratio(s1_norm, s2_norm)
+        return float(score / 100.0)
+
     def match_dealer_query(self, query: str) -> Optional[Tuple[str, float]]:
+
         """Match dealer name against catalog and return (name, similarity_score)."""
         cands = self.match_dealer_candidates(query, top_k=1)
         if cands:

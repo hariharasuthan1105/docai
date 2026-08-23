@@ -1,25 +1,30 @@
 {
+  "document_id": "invoice.png",
   "document": "invoice.png",
   "fields": {
     "dealer_name": {
       "value": "Mahindra & Mahindra Ltd.",
-      "confidence": 1.0,
+      "confidence": 0.964,
       "bbox": [
         881.0,
         75.0,
-        1189.0,
+        1190.0,
         88.0
-      ]
+      ],
+      "source": "fuzzy_match",
+      "page": 1
     },
     "model_name": {
       "value": "Model XYZ",
-      "confidence": 0.97,
+      "confidence": 0.941,
       "bbox": [
         98.0,
         403.0,
         274.0,
         417.0
-      ]
+      ],
+      "source": "exact_match",
+      "page": 1
     },
     "horse_power": {
       "value": 50.0,
@@ -29,28 +34,141 @@
         403.0,
         274.0,
         417.0
-      ]
+      ],
+      "source": "regex",
+      "page": 1
     },
     "asset_cost": {
       "value": 621000.0,
-      "confidence": 0.92,
+      "confidence": 0.7926,
       "bbox": [
-        642.0,
+        641.0,
         508.0,
         720.0,
         526.0
-      ]
+      ],
+      "source": "layout_kv",
+      "page": 1
+    },
+    "invoice_number": {
+      "value": ":INV/2024-25/00125",
+      "confidence": 0.9166,
+      "bbox": [
+        581.0,
+        113.0,
+        718.0,
+        127.0
+      ],
+      "source": "layout_kv",
+      "page": 1
+    },
+    "invoice_date": {
+      "value": ":15/05/2024",
+      "confidence": 0.7478,
+      "bbox": [
+        580.0,
+        135.0,
+        668.0,
+        152.0
+      ],
+      "source": "layout_kv",
+      "page": 1
+    },
+    "customer_name": {
+      "value": ",",
+      "confidence": 0.965,
+      "bbox": [
+        48.0,
+        223.0,
+        97.0,
+        241.0
+      ],
+      "source": "layout_kv",
+      "page": 1
+    },
+    "customer_address": {
+      "value": null,
+      "confidence": 0.0,
+      "bbox": null
+    },
+    "phone_number": {
+      "value": "0424-2255667 | Email: sales@srishakthitractors.in",
+      "confidence": 0.772,
+      "bbox": [
+        880.0,
+        124.0,
+        1241.0,
+        138.0
+      ],
+      "source": "layout_kv",
+      "page": 1
+    },
+    "registration_number": {
+      "value": null,
+      "confidence": 0.0,
+      "bbox": null
+    },
+    "serial_number": {
+      "value": null,
+      "confidence": 0.0,
+      "bbox": null
     },
     "dealer_signature": {
-      "status": "not_implemented"
+      "status": "detected",
+      "present": true,
+      "confidence": 0.8372,
+      "bbox": [
+        1253.0,
+        872.0,
+        1478.0,
+        987.0
+      ]
     },
     "dealer_stamp": {
-      "status": "not_implemented"
+      "status": "detected",
+      "present": true,
+      "confidence": 0.8914,
+      "bbox": [
+        503.0,
+        839.0,
+        624.0,
+        960.0
+      ]
     }
   },
   "validation": {
-    "overall_confidence": 0.96,
-    "needs_human_review": false,
-    "review_reasons": []
+    "overall_confidence": 0.9119,
+    "calibrated_confidence": null,
+    "decision": "REVIEW",
+    "needs_human_review": true,
+    "review_reasons": [
+      "Date ':15/05/2024' format unrecognized or unparseable.",
+      "Phone number '0424-2255667 | Email: sales@srishakthitractors.in' does not match standard 10-digit mobile pattern.",
+      "Field 'invoice_date' confidence (0.65) is critically low (extracted via 'layout_kv_right')."
+    ]
+  },
+  "processing_time_ms": 135396.13,
+  "metadata": {
+    "ocr_lines_count": 135,
+    "page_count": 1,
+    "ocr_metadata": {
+      "source_type": "image",
+      "preprocessing": {
+        "original_shape": [
+          1024,
+          1536,
+          3
+        ],
+        "skew_angle_corrected": 0.0,
+        "orientation_angle_corrected": 0,
+        "clahe_applied": true,
+        "denoise_applied": true,
+        "final_shape": [
+          1024,
+          1536,
+          3
+        ]
+      }
+    }
   }
 }

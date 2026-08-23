@@ -1,11 +1,11 @@
 """
-FastAPI Routes for Document AI Service.
+FastAPI Routes for Schema-Driven Multi-Document AI Service.
 
 Endpoints:
-- POST /predict: Process a single document upload or path
+- POST /predict: Process a single document upload or path (auto-detects document type)
 - POST /batch: Process multiple documents in batch
 - GET /health: Service health and capability diagnostics
-- GET /schema: JSON schema of extraction output
+- GET /schema: JSON schema and registered document types
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from docai.models.extraction_schema import FinalDocument
 from docai.pipeline import DocumentAIPipeline
+from docai.schemas.schema_loader import get_schema_registry
 
 router = APIRouter()
 
@@ -38,10 +39,12 @@ def get_pipeline() -> DocumentAIPipeline:
 class FilePathRequest(BaseModel):
     file_path: str
     document_id: Optional[str] = "doc_001"
+    document_type: Optional[str] = None
 
 
 class BatchFilePathRequest(BaseModel):
     file_paths: List[str]
+    document_type: Optional[str] = None
 
 
 class BatchResponse(BaseModel):
@@ -54,12 +57,17 @@ class BatchResponse(BaseModel):
 
 @router.get("/health", summary="Healthcheck and diagnostic capabilities")
 async def healthcheck() -> Dict[str, Any]:
+    registry = get_schema_registry()
     return {
         "status": "healthy",
         "service": "Document AI API",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "ocr_engine": "PaddleOCR 3.7",
+        "registered_schemas": registry.list_document_types(),
         "features": {
+            "schema_driven_architecture": True,
+            "automatic_document_type_classification": True,
+            "generic_table_extraction": True,
             "spatial_layout_intelligence": True,
             "computer_vision_signatures": True,
             "computer_vision_stamps": True,
@@ -69,9 +77,10 @@ async def healthcheck() -> Dict[str, Any]:
     }
 
 
-@router.get("/schema", summary="Extraction JSON schema")
+@router.get("/schema", summary="Extraction JSON schema and registered document schemas")
 async def get_extraction_schema() -> Dict[str, Any]:
     return FinalDocument.model_json_schema()
+
 
 
 @router.post("/predict", summary="Process a single document from file path")
@@ -82,14 +91,21 @@ async def predict_document(path_req: FilePathRequest) -> Dict[str, Any]:
 
     doc_id = path_req.document_id or os.path.basename(path_req.file_path)
     try:
-        res = pipeline.process(path_req.file_path, document_id=doc_id)
+        res = pipeline.process(
+            path_req.file_path,
+            document_id=doc_id,
+            document_type=path_req.document_type,
+        )
         return res.to_legacy_dict()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Document processing failed: {str(e)}") from e
 
 
 @router.post("/predict/upload", summary="Process a single document from multipart upload")
-async def predict_document_upload(file: UploadFile = File(...)) -> Dict[str, Any]:
+async def predict_document_upload(
+    file: UploadFile = File(...),
+    document_type: Optional[str] = Query(None, description="Optional document type override"),
+) -> Dict[str, Any]:
     pipeline = get_pipeline()
     suffix = os.path.splitext(file.filename or "doc.png")[1] or ".png"
     temp_path = None
@@ -98,7 +114,11 @@ async def predict_document_upload(file: UploadFile = File(...)) -> Dict[str, Any
             shutil.copyfileobj(file.file, tmp)
             temp_path = tmp.name
 
-        res = pipeline.process(temp_path, document_id=file.filename or "doc")
+        res = pipeline.process(
+            temp_path,
+            document_id=file.filename or "doc",
+            document_type=document_type,
+        )
         return res.to_legacy_dict()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Document upload processing failed: {str(e)}") from e
@@ -122,7 +142,11 @@ async def predict_batch(batch_req: BatchFilePathRequest) -> BatchResponse:
         try:
             if not os.path.exists(p):
                 raise FileNotFoundError(f"Path does not exist: {p}")
-            res = pipeline.process(p, document_id=os.path.basename(p))
+            res = pipeline.process(
+                p,
+                document_id=os.path.basename(p),
+                document_type=batch_req.document_type,
+            )
             results.append(res.to_legacy_dict())
             successful += 1
         except Exception as e:
@@ -140,7 +164,10 @@ async def predict_batch(batch_req: BatchFilePathRequest) -> BatchResponse:
 
 
 @router.post("/batch/upload", summary="Process multiple document uploads")
-async def predict_batch_upload(files: List[UploadFile] = File(...)) -> BatchResponse:
+async def predict_batch_upload(
+    files: List[UploadFile] = File(...),
+    document_type: Optional[str] = Query(None, description="Optional document type override"),
+) -> BatchResponse:
     pipeline = get_pipeline()
     start_time = time.perf_counter()
     results: List[Dict[str, Any]] = []
@@ -154,7 +181,11 @@ async def predict_batch_upload(files: List[UploadFile] = File(...)) -> BatchResp
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 shutil.copyfileobj(f.file, tmp)
                 temp_path = tmp.name
-            res = pipeline.process(temp_path, document_id=f.filename or "doc")
+            res = pipeline.process(
+                temp_path,
+                document_id=f.filename or "doc",
+                document_type=document_type,
+            )
             results.append(res.to_legacy_dict())
             successful += 1
         except Exception as e:

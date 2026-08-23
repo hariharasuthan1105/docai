@@ -1,0 +1,33 @@
+document_type: "generic"
+title: "Generic / Unclassified Document"
+description: "Fallback schema for arbitrary documents extracting discovered key-value pairs and tables"
+version: "1.0"
+
+classification:
+  title_keywords: []
+  keywords: []
+  required_anchors: []
+  min_score_threshold: 0.0
+
+sections:
+  - "extracted_fields"
+
+fields:
+  document_title:
+    section: "extracted_fields"
+    aliases: ["title", "document title", "heading"]
+    type: "string"
+    required: false
+    extraction_strategies: ["position_header"]
+
+tables:
+  detected_table:
+    name: "detected_table"
+    header_keywords: []
+    columns: []
+    min_rows: 1
+
+validations: []
+
+auto_approve_threshold: 0.85
+review_threshold: 0.65

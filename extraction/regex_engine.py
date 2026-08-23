@@ -413,3 +413,7 @@ class RegexExtractionEngine:
     def extract(self, ocr_text: str) -> Dict[str, FieldValue]:
         lines = [OCRLine(text=line, bbox=(0.0, 0.0, 0.0, 0.0), confidence=1.0, page=1) for line in ocr_text.splitlines() if line.strip()]
         return self.extract_from_ocr_result(OCRResult(lines=lines))
+
+
+# Alias for backward compatibility
+RegexEngine = RegexExtractionEngine
