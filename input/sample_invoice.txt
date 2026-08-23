@@ -1,0 +1,25 @@
+TAX INVOICE / QUOTATION
+---------------------------------------------
+Dealer Name: Mahindra Tractors Ltd.
+Authorized Dealer for Mahindra Farm Equipment
+GSTIN: 27AAAAA0000A1Z5
+
+Customer: Rajesh Patel
+Date: 12-Feb-2026
+
+ITEM DETAILS:
+Model Name: Arjun Novo 605 DI
+Engine Power: 50 HP (37.3 kW)
+Color: Red
+Fuel Type: Diesel
+
+PRICE BREAKUP:
+Base Price: Rs. 5,00,000.00
+GST (10%): Rs. 50,000.00
+---------------------------------------------
+Asset Cost: Rs. 5,50,000.00
+Total Amount Payable: Rs. 5,50,000/-
+---------------------------------------------
+
+Authorized Signatory
+Mahindra Tractors Ltd.

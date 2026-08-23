@@ -1,0 +1,94 @@
+{
+  "document": "input/sample_invoice.txt",
+  "pipeline": {
+    "model": "none (deterministic)",
+    "runtime": "rules_only",
+    "use_llm": false
+  },
+  "fields": {
+    "dealer_name": {
+      "value": "Mahindra Tractors Ltd.",
+      "confidence": 1.0,
+      "source": "fuzzy_match",
+      "evidence": "Dealer Name: Mahindra Tractors Ltd."
+    },
+    "model_name": {
+      "value": "Arjun Novo 605 DI",
+      "confidence": 1.0,
+      "source": "fuzzy_match",
+      "evidence": "Model Name: Arjun Novo 605 DI"
+    },
+    "horse_power": {
+      "value": "50.0",
+      "confidence": 0.9,
+      "source": "regex",
+      "evidence": "Engine Power: 50 HP"
+    },
+    "asset_cost": {
+      "value": "550000.0",
+      "confidence": 0.85,
+      "source": "regex",
+      "evidence": "Asset Cost: Rs. 5,50,000.00"
+    }
+  },
+  "vision": {
+    "dealer_signature": {
+      "present": false,
+      "bbox": null,
+      "confidence": 0.0,
+      "status": "not_implemented"
+    },
+    "dealer_stamp": {
+      "present": false,
+      "bbox": null,
+      "confidence": 0.0,
+      "status": "not_implemented"
+    }
+  },
+  "validation": {
+    "overall_confidence": 0.925,
+    "needs_human_review": false,
+    "review_reasons": []
+  },
+  "raw": {
+    "dealer_name": {
+      "value": "Mahindra Tractors Ltd.",
+      "confidence": 1.0,
+      "source": "fuzzy_match",
+      "evidence": "Dealer Name: Mahindra Tractors Ltd."
+    },
+    "model_name": {
+      "value": "Arjun Novo 605 DI",
+      "confidence": 1.0,
+      "source": "fuzzy_match",
+      "evidence": "Model Name: Arjun Novo 605 DI"
+    },
+    "horse_power": {
+      "value": "50.0",
+      "confidence": 0.9,
+      "source": "regex",
+      "evidence": "Engine Power: 50 HP"
+    },
+    "asset_cost": {
+      "value": "550000.0",
+      "confidence": 0.85,
+      "source": "regex",
+      "evidence": "Asset Cost: Rs. 5,50,000.00"
+    },
+    "dealer_signature": {
+      "present": false,
+      "bbox": null,
+      "confidence": 0.0,
+      "status": "not_implemented"
+    },
+    "dealer_stamp": {
+      "present": false,
+      "bbox": null,
+      "confidence": 0.0,
+      "status": "not_implemented"
+    },
+    "overall_confidence": 0.925,
+    "needs_human_review": false,
+    "review_reasons": []
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "document": "invoice.png",
+  "fields": {
+    "dealer_name": {
+      "value": "Mahindra & Mahindra Ltd.",
+      "confidence": 1.0,
+      "bbox": [
+        881.0,
+        75.0,
+        1189.0,
+        88.0
+      ]
+    },
+    "model_name": {
+      "value": "Model XYZ",
+      "confidence": 0.97,
+      "bbox": [
+        98.0,
+        403.0,
+        274.0,
+        417.0
+      ]
+    },
+    "horse_power": {
+      "value": 50.0,
+      "confidence": 0.95,
+      "bbox": [
+        98.0,
+        403.0,
+        274.0,
+        417.0
+      ]
+    },
+    "asset_cost": {
+      "value": 621000.0,
+      "confidence": 0.92,
+      "bbox": [
+        642.0,
+        508.0,
+        720.0,
+        526.0
+      ]
+    },
+    "dealer_signature": {
+      "status": "not_implemented"
+    },
+    "dealer_stamp": {
+      "status": "not_implemented"
+    }
+  },
+  "validation": {
+    "overall_confidence": 0.96,
+    "needs_human_review": false,
+    "review_reasons": []
+  }
+}

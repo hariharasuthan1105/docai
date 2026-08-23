@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docai"
+version = "0.3.0"
+description = "Deterministic Terminal/CLI Document AI Pipeline using PaddleOCR, regex extraction, fuzzy matching, and business validation"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pydantic>=2.0",
+    "rapidfuzz>=3.0",
+    "paddleocr>=2.7",
+    "paddlepaddle>=2.5",
+    "pypdfium2>=4.0.0",
+]
+
+[project.scripts]
+docai = "docai.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["docai*"]

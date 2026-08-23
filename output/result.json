@@ -1,0 +1,56 @@
+{
+  "document": "input/sample_invoice.txt",
+  "fields": {
+    "dealer_name": {
+      "value": "Mahindra Tractors Ltd.",
+      "confidence": 1.0,
+      "bbox": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "model_name": {
+      "value": "Arjun Novo 605 DI",
+      "confidence": 0.97,
+      "bbox": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "horse_power": {
+      "value": 50.0,
+      "confidence": 0.95,
+      "bbox": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "asset_cost": {
+      "value": 550000.0,
+      "confidence": 0.92,
+      "bbox": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "dealer_signature": {
+      "status": "not_implemented"
+    },
+    "dealer_stamp": {
+      "status": "not_implemented"
+    }
+  },
+  "validation": {
+    "overall_confidence": 0.96,
+    "needs_human_review": false,
+    "review_reasons": []
+  }
+}
