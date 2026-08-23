@@ -41,7 +41,10 @@ def test_schema_endpoint(client):
     assert response.status_code == 200
     data = response.json()
     assert "properties" in data
-    assert "dealer_name" in data["properties"]
+    # DocumentResult is generic; check core generic fields exist
+    assert "document_type" in data["properties"]
+    assert "fields" in data["properties"]
+    assert "overall_confidence" in data["properties"]
 
 
 def test_predict_endpoint_file_path(client, tmp_path):

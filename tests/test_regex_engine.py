@@ -4,13 +4,13 @@ Unit tests for deterministic regex extraction and numeric normalization.
 
 import pytest
 from docai.extraction.regex_engine import (
-    RegexExtractionEngine,
     extract_asset_cost_from_line,
     extract_horse_power_from_line,
     normalize_numeric_string,
 )
 from docai.models.extraction_schema import FieldSource
 from docai.ocr.paddleocr_engine import OCRLine, OCRResult
+
 
 
 class TestNumericNormalization:
@@ -77,6 +77,13 @@ class TestAssetCostRegex:
 
 class TestRegexExtractionEngine:
     def test_extract_from_ocr_result_with_bboxes(self):
+        """
+        Tests the TractorRegexBaseline (evaluation/baselines) which returns
+        tractor-specific field names. The generic RegexExtractionEngine no longer
+        returns hardcoded field names (those come from schema YAML).
+        """
+        from docai.evaluation.baselines.tractor_regex_baseline import TractorRegexBaseline
+
         lines = [
             OCRLine(text="Tax Invoice", bbox=(10, 10, 200, 30), confidence=0.99),
             OCRLine(text="Dealer Name: Mahindra Tractors Ltd.", bbox=(10, 40, 350, 60), confidence=0.98),
@@ -84,8 +91,8 @@ class TestRegexExtractionEngine:
             OCRLine(text="Engine Power: 50 HP", bbox=(10, 100, 180, 120), confidence=0.97),
             OCRLine(text="Asset Cost: Rs. 5,50,000.00", bbox=(10, 130, 250, 150), confidence=0.99),
         ]
-        engine = RegexExtractionEngine()
-        fields = engine.extract_from_ocr_result(OCRResult(lines=lines))
+        baseline = TractorRegexBaseline()
+        fields = baseline.extract_from_ocr_result(OCRResult(lines=lines))
 
         assert fields["horse_power"].value == 50.0
         assert fields["horse_power"].bbox == [10.0, 100.0, 180.0, 120.0]
@@ -98,3 +105,4 @@ class TestRegexExtractionEngine:
 
         assert fields["model_name"].value == "Arjun Novo 605 DI"
         assert fields["model_name"].bbox == [10.0, 70.0, 300.0, 90.0]
+

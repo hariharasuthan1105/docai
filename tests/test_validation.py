@@ -96,5 +96,5 @@ class TestConfidenceScoring:
         decision, review, reasons = make_review_decision(0.70, [])
         assert decision == ReviewDecision.REVIEW
         assert review is True
-        assert any("below auto-approval threshold" in r for r in reasons)
+        assert any("below auto-approve threshold" in r for r in reasons)
 

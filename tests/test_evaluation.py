@@ -72,7 +72,11 @@ def test_evaluator_metrics(tmp_path):
 
     pipeline = DocumentAIPipeline(ocr_engine=StubOCREngine(canned_lines=lines))
     evaluator = DocumentAIEvaluator(pipeline=pipeline)
-    metrics = evaluator.evaluate_dataset([sample_doc])
+    eval_fields = [
+        "dealer_name", "model_name", "horse_power", "asset_cost",
+        "invoice_number", "invoice_date", "customer_name", "phone_number"
+    ]
+    metrics = evaluator.evaluate_dataset([sample_doc], field_names=eval_fields)
 
     assert metrics.total_documents == 1
     assert metrics.document_level_accuracy == 1.0

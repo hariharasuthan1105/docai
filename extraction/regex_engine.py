@@ -1,8 +1,18 @@
 """
-Deterministic regex/rule-based extraction with OCR line bounding-box association.
+Regex Pattern Utilities for Schema-Driven and Baseline Extraction.
 
-Extracts Horse Power, Asset Cost, Invoice Number, Date, Customer Details,
-Phone Number, Registration/Serial Number, Dealer, and Model candidates.
+This module provides:
+  - normalize_numeric_string(): shared numeric normalization
+  - Individual pattern-extraction utility functions (tractor-compatible, used by baseline & tests)
+  - RegexExtractionEngine: a GENERIC class that applies schema.field.regex_patterns
+    to OCR lines, returning {field_name: FieldValue} where field names come from YAML
+
+ARCHITECTURE NOTES:
+  - RegexExtractionEngine does NOT return hardcoded field names. Names come from the schema.
+  - Individual helper functions (extract_horse_power_from_line, etc.) are pure utilities
+    with no hardcoded output dict. They are reused by the tractor baseline and tests.
+  - The tractor-domain class TractorRegexBaseline (which returns a field-named dict) lives
+    in evaluation/baselines/tractor_regex_baseline.py for ablation purposes only.
 """
 
 from __future__ import annotations
@@ -13,7 +23,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from docai.models.extraction_schema import FieldSource, FieldValue
 from docai.ocr.paddleocr_engine import OCRLine, OCRResult
 
-# --- Horse Power Patterns ----------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Re-usable Pattern Libraries (not domain assumptions — just regex primitives)
+# Used by: tractor baseline, schema-defined field regexes, and unit tests
+# ---------------------------------------------------------------------------
+
 _HP_PATTERNS = [
     re.compile(
         r"(?:horse\s*power|engine\s*power|power|hp)\s*[:\-]\s*(\d{1,3}(?:\.\d+)?)\s*(?:h\.?p\.?|hp)?",
@@ -27,10 +42,10 @@ _HP_PATTERNS = [
     re.compile(r"\bhp\s*[:\-]?\s*(\d{1,3}(?:\.\d+)?)\b", re.IGNORECASE),
 ]
 
-# --- Asset Cost Patterns -----------------------------------------------------
 _PRIMARY_COST_PATTERNS = [
     re.compile(
-        r"(?:asset\s*cost|total\s*cost|grand\s*total|invoice\s*total|net\s*total|invoice\s*value|total\s*amount(?:\s*payable)?|amount\s*payable|total\s*(?:\([^)]*\))?)\s*[:\-]?\s*"
+        r"(?:asset\s*cost|total\s*cost|grand\s*total|invoice\s*total|net\s*total|invoice\s*value"
+        r"|total\s*amount(?:\s*payable)?|amount\s*payable|total\s*(?:\([^)]*\))?)\s*[:\-]?\s*"
         r"(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d{1,2})?)\s*(?:/-)?",
         re.IGNORECASE,
     ),
@@ -42,69 +57,16 @@ _SECONDARY_COST_PATTERNS = [
         r"(?:rs\.?|inr|₹)?\s*([\d,]+(?:\.\d{1,2})?)\s*(?:/-)?",
         re.IGNORECASE,
     ),
-    re.compile(
-        r"(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)\s*(?:/-)?",
-        re.IGNORECASE,
-    ),
-]
-
-# --- Invoice Number & Date Patterns ------------------------------------------
-_INVOICE_NUM_PATTERNS = [
-    re.compile(r"(?:invoice\s*(?:no\.?|num\.?|number|#)|bill\s*(?:no\.?|number)|inv\s*no\.?)\s*[:\-]?\s*([a-zA-Z0-9\-\/]+)", re.IGNORECASE),
-    re.compile(r"\b(?:inv|bill)[/\-_](?:20\d{2}[/\-_])?[a-zA-Z0-9\-]+\b", re.IGNORECASE),
-]
-
-_DATE_PATTERNS = [
-    re.compile(r"(?:date|dated|invoice\s*date|bill\s*date)\s*[:\-]?\s*(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})", re.IGNORECASE),
-    re.compile(r"(?:date|dated|invoice\s*date)\s*[:\-]?\s*(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4})", re.IGNORECASE),
-    re.compile(r"\b(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})\b"),
-]
-
-# --- Phone & Registration / Serial Patterns ----------------------------------
-_PHONE_PATTERNS = [
-    re.compile(r"(?:phone|mobile|mob|contact|tel)\s*(?:no\.?|number)?\s*[:\-]?\s*(?:\+91[\-\s]?)?([6-9]\d{9})\b", re.IGNORECASE),
-    re.compile(r"\b(?:\+91[\-\s]?)?([6-9]\d{4}[\-\s]?\d{5})\b"),
-]
-
-_REG_NO_PATTERNS = [
-    re.compile(r"(?:reg(?:istration)?\s*no\.?|chassis\s*no\.?)\s*[:\-]?\s*([A-Z]{2}[0-9\s\-]{1,3}[A-Z]{0,3}[0-9]{3,4})", re.IGNORECASE),
-    re.compile(r"\b([A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{4})\b"),
-]
-
-_SERIAL_NO_PATTERNS = [
-    re.compile(r"(?:serial\s*no\.?|sl\.?\s*no\.?|engine\s*no\.?|tractor\s*serial\s*no\.?)\s*[:\-]?\s*([a-zA-Z0-9\-\/]+)", re.IGNORECASE),
-]
-
-# --- Dealer & Model Line Patterns --------------------------------------------
-_DEALER_PATTERNS = [
-    re.compile(r"(?:dealer\s*name|dealer|m/s\.?|authorized\s*dealer|authorised\s*dealer)\s*[:\-]?\s*(.+)", re.IGNORECASE),
-]
-
-_MODEL_PATTERNS = [
-    re.compile(r"(?:model\s*name|model|item\s*name|item|tractor\s*model)\s*[:\-]?\s*(.+)", re.IGNORECASE),
-]
-
-_CUSTOMER_PATTERNS = [
-    re.compile(r"(?:customer\s*name|buyer\s*name|buyer|bill\s*to|purchaser|sold\s*to)\s*[:\-]?\s*(.+)", re.IGNORECASE),
-]
-
-_ADDRESS_PATTERNS = [
-    re.compile(r"(?:customer\s*address|buyer\s*address|address)\s*[:\-]?\s*(.+)", re.IGNORECASE),
+    re.compile(r"(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)\s*(?:/-)?", re.IGNORECASE),
 ]
 
 
-def normalize_numeric_string(raw_str: str) -> Optional[float]:
-    """Parse a numeric string supporting commas and Indian number formats."""
-    if not raw_str:
-        return None
-    cleaned = raw_str.replace(",", "").strip()
-    try:
-        return float(cleaned)
-    except ValueError:
-        return None
-
-
-def extract_horse_power_from_line(line_text: str, bbox: Optional[Tuple[float, float, float, float]] = None, page: int = 1) -> Optional[FieldValue]:
+def extract_horse_power_from_line(
+    line_text: str,
+    bbox: Optional[Tuple[float, float, float, float]] = None,
+    page: int = 1,
+) -> Optional[FieldValue]:
+    """Extract horse power value from a single OCR line. Pure utility, no field dict."""
     for pattern in _HP_PATTERNS:
         match = pattern.search(line_text)
         if match:
@@ -129,6 +91,7 @@ def extract_asset_cost_from_line(
     primary_only: bool = False,
     page: int = 1,
 ) -> Optional[FieldValue]:
+    """Extract asset/invoice cost from a single OCR line. Pure utility, no field dict."""
     patterns = _PRIMARY_COST_PATTERNS if primary_only else (_PRIMARY_COST_PATTERNS + _SECONDARY_COST_PATTERNS)
     for pattern in patterns:
         match = pattern.search(line_text)
@@ -148,272 +111,116 @@ def extract_asset_cost_from_line(
     return None
 
 
-def extract_invoice_number_from_line(line_text: str, bbox: Optional[Tuple[float, float, float, float]] = None, page: int = 1) -> Optional[FieldValue]:
-    for pat in _INVOICE_NUM_PATTERNS:
-        m = pat.search(line_text)
-        if m:
-            val = m.group(1).strip() if m.groups() else m.group(0).strip()
-            if len(val) >= 3:
+def normalize_numeric_string(raw_str: str) -> Optional[float]:
+    """Parse a numeric string supporting commas and Indian number formats."""
+    if not raw_str:
+        return None
+    cleaned = raw_str.replace(",", "").strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def extract_first_match(
+    line_text: str,
+    patterns: List[re.Pattern],
+    bbox: Optional[Tuple[float, float, float, float]] = None,
+    page: int = 1,
+    method: str = "regex",
+    min_length: int = 1,
+) -> Optional[FieldValue]:
+    """
+    Try each compiled pattern against line_text in order.
+    Return a FieldValue for the first match, or None.
+
+    This is a pure utility — caller supplies patterns and field semantics.
+    """
+    for pattern in patterns:
+        match = pattern.search(line_text)
+        if match:
+            raw_val = match.group(1).strip() if match.groups() else match.group(0).strip()
+            if len(raw_val) >= min_length:
                 return FieldValue(
-                    value=val,
+                    value=raw_val,
                     confidence=0.90,
                     source=FieldSource.REGEX,
-                    evidence=m.group(0).strip(),
+                    evidence=match.group(0).strip(),
                     bbox=list(bbox) if bbox else None,
                     page=page,
-                    method="regex_invoice_num",
+                    method=method,
                 )
-    return None
-
-
-def extract_date_from_line(line_text: str, bbox: Optional[Tuple[float, float, float, float]] = None, page: int = 1) -> Optional[FieldValue]:
-    for pat in _DATE_PATTERNS:
-        m = pat.search(line_text)
-        if m:
-            val = m.group(1).strip()
-            return FieldValue(
-                value=val,
-                confidence=0.91,
-                source=FieldSource.REGEX,
-                evidence=m.group(0).strip(),
-                bbox=list(bbox) if bbox else None,
-                page=page,
-                method="regex_date",
-            )
-    return None
-
-
-def extract_phone_from_line(line_text: str, bbox: Optional[Tuple[float, float, float, float]] = None, page: int = 1) -> Optional[FieldValue]:
-    for pat in _PHONE_PATTERNS:
-        m = pat.search(line_text)
-        if m:
-            val = re.sub(r"[^\d]", "", m.group(1))
-            if len(val) == 10:
-                return FieldValue(
-                    value=val,
-                    confidence=0.92,
-                    source=FieldSource.REGEX,
-                    evidence=m.group(0).strip(),
-                    bbox=list(bbox) if bbox else None,
-                    page=page,
-                    method="regex_phone",
-                )
-    return None
-
-
-def extract_serial_no_from_line(line_text: str, bbox: Optional[Tuple[float, float, float, float]] = None, page: int = 1) -> Optional[FieldValue]:
-    for pat in _SERIAL_NO_PATTERNS:
-        m = pat.search(line_text)
-        if m:
-            val = m.group(1).strip()
-            if len(val) >= 4:
-                return FieldValue(
-                    value=val,
-                    confidence=0.88,
-                    source=FieldSource.REGEX,
-                    evidence=m.group(0).strip(),
-                    bbox=list(bbox) if bbox else None,
-                    page=page,
-                    method="regex_serial_no",
-                )
-    return None
-
-
-def extract_reg_no_from_line(line_text: str, bbox: Optional[Tuple[float, float, float, float]] = None, page: int = 1) -> Optional[FieldValue]:
-    for pat in _REG_NO_PATTERNS:
-        m = pat.search(line_text)
-        if m:
-            val = m.group(1).strip().replace(" ", "")
-            return FieldValue(
-                value=val,
-                confidence=0.89,
-                source=FieldSource.REGEX,
-                evidence=m.group(0).strip(),
-                bbox=list(bbox) if bbox else None,
-                page=page,
-                method="regex_reg_no",
-            )
     return None
 
 
 class RegexExtractionEngine:
-    """Extracts all document fields and associates OCR line bounding boxes."""
+    """
+    Generic schema-driven regex extractor.
 
-    def extract_from_ocr_result(self, ocr_result: OCRResult) -> Dict[str, FieldValue]:
-        hp_field = FieldValue()
-        cost_field = FieldValue()
-        dealer_field = FieldValue()
-        model_field = FieldValue()
-        inv_no_field = FieldValue()
-        date_field = FieldValue()
-        cust_name_field = FieldValue()
-        cust_addr_field = FieldValue()
-        phone_field = FieldValue()
-        reg_no_field = FieldValue()
-        serial_no_field = FieldValue()
+    Applies schema-defined regex_patterns for each field in the schema,
+    scanning each OCR line. Returns a dict[field_name -> FieldValue] where
+    field names come from the schema, not from hardcoded strings in this class.
 
-        lines = ocr_result.lines
-        n_lines = len(lines)
+    Usage:
+        engine = RegexExtractionEngine(schema)
+        fields = engine.extract_from_ocr(ocr_result)
+    """
 
-        # Pass 1: Extract individual lines and 2-line adjacent windows
-        for i, line in enumerate(lines):
-            text = line.text.strip()
-            if not text:
+    def __init__(self, schema=None):
+        """
+        schema: DocumentSchema instance. If None, returns empty dict (no patterns to apply).
+        """
+        self.schema = schema
+
+    def extract_from_ocr(self, ocr_result: OCRResult) -> Dict[str, FieldValue]:
+        """
+        Apply schema field regex_patterns to OCR lines.
+        Returns {field_name: FieldValue} where field_name is from schema YAML.
+        """
+        if not self.schema:
+            return {}
+
+        results: Dict[str, FieldValue] = {}
+
+        for fname, fdef in self.schema.fields.items():
+            compiled = fdef.get_compiled_regexes()
+            if not compiled:
                 continue
 
-            page = getattr(line, "page", 1)
-
-            if not hp_field.is_present():
-                hp = extract_horse_power_from_line(text, line.bbox, page=page)
-                if hp:
-                    hp_field = hp
-
-            if not cost_field.is_present():
-                cost = extract_asset_cost_from_line(text, line.bbox, primary_only=True, page=page)
-                if cost:
-                    cost_field = cost
-
-            if not inv_no_field.is_present():
-                inv = extract_invoice_number_from_line(text, line.bbox, page=page)
-                if inv:
-                    inv_no_field = inv
-
-            if not date_field.is_present():
-                dt = extract_date_from_line(text, line.bbox, page=page)
-                if dt:
-                    date_field = dt
-
-            if not phone_field.is_present():
-                ph = extract_phone_from_line(text, line.bbox, page=page)
-                if ph:
-                    phone_field = ph
-
-            if not reg_no_field.is_present():
-                rg = extract_reg_no_from_line(text, line.bbox, page=page)
-                if rg:
-                    reg_no_field = rg
-
-            if not serial_no_field.is_present():
-                sn = extract_serial_no_from_line(text, line.bbox, page=page)
-                if sn:
-                    serial_no_field = sn
-
-            # Dealer candidate
-            if not dealer_field.is_present():
-                for pat in _DEALER_PATTERNS:
-                    m = pat.search(text)
-                    if m:
-                        val = m.group(1).strip()
-                        if len(val) >= 3:
-                            dealer_field = FieldValue(
-                                value=val,
-                                confidence=0.75,
-                                source=FieldSource.REGEX,
-                                evidence=m.group(0).strip(),
-                                bbox=list(line.bbox) if line.bbox else None,
-                                page=page,
-                                method="regex_dealer_candidate",
-                            )
-
-            # Model candidate
-            if not model_field.is_present():
-                for pat in _MODEL_PATTERNS:
-                    m = pat.search(text)
-                    if m:
-                        val = m.group(1).strip()
-                        if len(val) >= 2:
-                            model_field = FieldValue(
-                                value=val,
-                                confidence=0.75,
-                                source=FieldSource.REGEX,
-                                evidence=m.group(0).strip(),
-                                bbox=list(line.bbox) if line.bbox else None,
-                                page=page,
-                                method="regex_model_candidate",
-                            )
-
-            # Customer candidate
-            if not cust_name_field.is_present():
-                for pat in _CUSTOMER_PATTERNS:
-                    m = pat.search(text)
-                    if m:
-                        val = m.group(1).strip()
-                        if len(val) >= 3:
-                            cust_name_field = FieldValue(
-                                value=val,
-                                confidence=0.75,
-                                source=FieldSource.REGEX,
-                                evidence=m.group(0).strip(),
-                                bbox=list(line.bbox) if line.bbox else None,
-                                page=page,
-                                method="regex_customer",
-                            )
-
-            # 2-line adjacent window for cost
-            if not cost_field.is_present() and i + 1 < n_lines:
-                next_line = lines[i + 1]
-                combined_text = f"{text} {next_line.text.strip()}"
-                combined_bbox = next_line.bbox or line.bbox
-                extracted_cost = extract_asset_cost_from_line(combined_text, combined_bbox, primary_only=True, page=page)
-                if extracted_cost:
-                    cost_field = extracted_cost
-
-        # Pass 2: Secondary cost patterns
-        if not cost_field.is_present():
-            for i, line in enumerate(lines):
+            for line in ocr_result.lines:
                 text = line.text.strip()
+                if not text:
+                    continue
                 page = getattr(line, "page", 1)
-                extracted_cost = extract_asset_cost_from_line(text, line.bbox, primary_only=False, page=page)
-                if extracted_cost:
-                    cost_field = extracted_cost
-                    break
-                if i + 1 < n_lines:
-                    next_line = lines[i + 1]
-                    combined_text = f"{text} {next_line.text.strip()}"
-                    combined_bbox = next_line.bbox or line.bbox
-                    extracted_cost = extract_asset_cost_from_line(combined_text, combined_bbox, primary_only=False, page=page)
-                    if extracted_cost:
-                        cost_field = extracted_cost
-                        break
+                bbox = tuple(line.bbox) if line.bbox else None
 
-        # Pass 3: Plausible numeric invoice total fallback
-        if not cost_field.is_present():
-            candidate_costs: List[Tuple[float, OCRLine]] = []
-            for line in lines:
-                text = line.text.strip()
-                num = normalize_numeric_string(text)
-                if num and 50_000.0 <= num <= 50_000_000.0:
-                    candidate_costs.append((num, line))
-            if candidate_costs:
-                max_num, best_line = max(candidate_costs, key=lambda x: x[0])
-                cost_field = FieldValue(
-                    value=max_num,
-                    confidence=0.85,
-                    source=FieldSource.REGEX,
-                    evidence=best_line.text.strip(),
-                    bbox=list(best_line.bbox) if best_line.bbox else None,
-                    page=getattr(best_line, "page", 1),
-                    method="regex_numeric_fallback",
+                match_result = extract_first_match(
+                    text,
+                    compiled,
+                    bbox=bbox,
+                    page=page,
+                    method=f"regex_{fname}",
                 )
+                if match_result:
+                    results[fname] = match_result
+                    break  # First match per field wins
 
-        return {
-            "dealer_name": dealer_field,
-            "model_name": model_field,
-            "horse_power": hp_field,
-            "asset_cost": cost_field,
-            "invoice_number": inv_no_field,
-            "invoice_date": date_field,
-            "customer_name": cust_name_field,
-            "customer_address": cust_addr_field,
-            "phone_number": phone_field,
-            "registration_number": reg_no_field,
-            "serial_number": serial_no_field,
-        }
+        return results
+
+    # Keep backward-compat method name (used in some tests)
+    def extract_from_ocr_result(self, ocr_result: OCRResult) -> Dict[str, FieldValue]:
+        """Backward-compatible alias for extract_from_ocr()."""
+        return self.extract_from_ocr(ocr_result)
 
     def extract(self, ocr_text: str) -> Dict[str, FieldValue]:
-        lines = [OCRLine(text=line, bbox=(0.0, 0.0, 0.0, 0.0), confidence=1.0, page=1) for line in ocr_text.splitlines() if line.strip()]
-        return self.extract_from_ocr_result(OCRResult(lines=lines))
+        """Extract from raw text string (no bbox info)."""
+        lines = [
+            OCRLine(text=line, bbox=(0.0, 0.0, 0.0, 0.0), confidence=1.0, page=1)
+            for line in ocr_text.splitlines()
+            if line.strip()
+        ]
+        return self.extract_from_ocr(OCRResult(lines=lines))
 
 
-# Alias for backward compatibility
+# Backward-compat alias
 RegexEngine = RegexExtractionEngine

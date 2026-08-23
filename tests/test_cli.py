@@ -56,10 +56,10 @@ def test_cli_run_and_export_json(tmp_path, capsys):
     assert data["fields"]["model_name"]["value"] == "Arjun Novo 605 DI"
     assert data["fields"]["horse_power"]["value"] == 50.0
     assert data["fields"]["asset_cost"]["value"] == 550000.0
-    assert data["fields"]["dealer_signature"]["status"] == "not_implemented"
-    assert data["fields"]["dealer_stamp"]["status"] == "not_implemented"
-    assert data["validation"]["needs_human_review"] is False
-    assert data["validation"]["overall_confidence"] >= 0.85
+    assert data["visual_marks"]["signature"]["status"] == "not_implemented"
+    assert data["visual_marks"]["stamp"]["status"] == "not_implemented"
+    assert data["review_required"] is False
+    assert data["overall_confidence"] >= 0.85
 
 
 def test_cli_custom_config(tmp_path, capsys):

@@ -42,7 +42,7 @@ def test_table_detector_and_extractor():
         page_count=1,
     )
 
-    detector = TableDetector()
+    detector = TableDetector(stop_keywords=["subtotal"])
     regions = detector.detect_tables(ocr_res)
     assert len(regions) == 1
     reg = regions[0]

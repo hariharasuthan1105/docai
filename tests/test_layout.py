@@ -62,7 +62,12 @@ def test_layout_kv_extractor():
         OCRLine(text="732,780.00", bbox=(10.0, 230.0, 120.0, 250.0), confidence=0.95),
     ]
 
-    extractor = LayoutKVExtractor()
+    import re
+    anchors = {
+        "horse_power": [re.compile(r"horse\s*power", re.IGNORECASE)],
+        "asset_cost": [re.compile(r"total\s*\(₹\)", re.IGNORECASE)],
+    }
+    extractor = LayoutKVExtractor(anchors=anchors)
     fields = extractor.extract_fields(lines)
 
     assert "horse_power" in fields
