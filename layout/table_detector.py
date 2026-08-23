@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from docai.models.extraction_schema import BoundingBox
 from docai.ocr.paddleocr_engine import OCRLine, OCRResult
@@ -72,8 +72,22 @@ class TableDetector:
     Identifies table header rows, column positions, and table bounding regions.
     """
 
-    def __init__(self, table_defs: Optional[Dict[str, TableDefinition]] = None):
+    # Minimal geometric stop patterns that are document-type-agnostic
+    # (only truly universal terminators — not domain-specific labels)
+    _GENERIC_STOP_PATTERNS = [
+        r"^thank\s*you\b",
+        r"^authorized\s+signatory\b",
+        r"^for\s+[A-Z]",
+    ]
+
+    def __init__(
+        self,
+        table_defs: Optional[Dict[str, TableDefinition]] = None,
+        stop_keywords: Optional[List[str]] = None,
+    ):
         self.table_defs = table_defs or {}
+        # Domain-specific stop keywords come from the selected schema YAML
+        self.stop_keywords: List[str] = stop_keywords or []
 
     def detect_tables(self, ocr_result: OCRResult) -> List[TableRegion]:
         lines = ocr_result.lines
@@ -121,10 +135,14 @@ class TableDetector:
                     candidate = lines[j]
                     cand_text = candidate.text.lower().strip()
 
-                    # Stop conditions: totals, footer, signature/stamp markers, blank
-                    if re.search(r"^(?:subtotal|sub\s*total|grand\s*total|taxable|cgst|sgst|discount|total|thank\s*you)\b", cand_text):
+                    # Stop conditions: schema-defined domain keywords
+                    stop_hit = any(kw.lower() in cand_text for kw in self.stop_keywords)
+                    if stop_hit:
                         break
-                    if "authorized signatory" in cand_text or "for " in cand_text:
+
+                    # Generic geometric stop patterns (domain-agnostic)
+                    generic_stop = any(re.search(pat, cand_text, re.IGNORECASE) for pat in self._GENERIC_STOP_PATTERNS)
+                    if generic_stop:
                         break
 
                     # If line starts with a number (S.No.) or matches column alignment

@@ -40,6 +40,94 @@ sections:
   - "metadata"
   - "customer"
 
+# Schema-driven visual marks (replaces hardcoded dealer_signature/dealer_stamp)
+vision:
+  marks:
+    - name: signature
+      mark_type: signature
+      label: "Dealer Signature"
+    - name: stamp
+      mark_type: stamp
+      label: "Dealer Stamp"
+
+# Schema-driven table stop keywords (replaces hardcoded list in table_detector.py)
+stop_keywords:
+  - "subtotal"
+  - "sub total"
+  - "grand total"
+  - "taxable"
+  - "cgst"
+  - "sgst"
+  - "discount"
+  - "total"
+  - "thank you"
+  - "authorized signatory"
+  - "authorised signatory"
+  - "for "
+
+# Named entity catalogs referenced by field.catalog_ref
+entity_catalogs:
+  dealer_master:
+    - "Mahindra & Mahindra Ltd."
+    - "Mahindra Tractors Ltd."
+    - "Mahindra Farm Equipment"
+    - "Swaraj Tractors Ltd."
+    - "Sonalika Tractors Ltd."
+    - "Escorts Kubota Ltd."
+    - "John Deere India Pvt. Ltd."
+    - "Tafe Tractors and Farm Equipment Ltd."
+    - "New Holland Agriculture"
+    - "Eicher Tractors"
+    - "Force Motors Ltd."
+    - "VST Tillers Tractors Ltd."
+    - "Preet Tractors Pvt. Ltd."
+    - "Indo Farm Equipment Ltd."
+    - "Captain Tractors Pvt. Ltd."
+    - "Gujarat Tractors Ltd."
+    - "Sri Shakthi Tractors"
+    - "Sri Shakthi Tractors Pvt. Ltd."
+    - "ABC Tractors Pvt. Ltd."
+    - "ABC Tractors"
+  model_master:
+    - "Arjun 605"
+    - "Arjun 605 DI"
+    - "Arjun Novo 605 DI"
+    - "Arjun Novo 605 DI-i"
+    - "Arjun Novo 605 DI-PS"
+    - "Yuvraj 215"
+    - "Yuvraj 215 NXT"
+    - "Mahindra Yuvo Tech+"
+    - "Mahindra Yuvo Tech"
+    - "Mahindra Yuvo 575 DI"
+    - "Mahindra Yuvo 415 DI"
+    - "Mahindra Yuvo 475 DI"
+    - "Mahindra Yuvo 585 DI"
+    - "Yuvo Tech+"
+    - "Model XYZ"
+    - "Swaraj 744"
+    - "Swaraj 744 FE"
+    - "Swaraj 744 XT"
+    - "Swaraj 855"
+    - "Swaraj 855 FE"
+    - "Swaraj 735 FE"
+    - "Mahindra 575 DI"
+    - "Mahindra 575 DI XP Plus"
+    - "Mahindra 275 DI"
+    - "Mahindra 275 DI TU"
+    - "Mahindra 475 DI"
+    - "Mahindra Jivo 245 DI"
+    - "Mahindra OJA 3140"
+    - "John Deere 5050 D"
+    - "John Deere 5310"
+    - "Sonalika DI 745 III"
+    - "Sonalika Sikander RX 50"
+    - "Eicher 380"
+    - "Eicher 485"
+    - "Eicher 557"
+    - "Farmtrac 60"
+    - "Powertrac Euro 50"
+    - "Kubota MU4501"
+
 fields:
   dealer_name:
     section: "dealer"
@@ -52,6 +140,7 @@ fields:
     type: "string"
     required: true
     extraction_strategies: ["entity_match", "key_value", "regex"]
+    catalog_ref: "dealer_master"
     confidence_weight: 1.0
 
   model_name:
@@ -65,6 +154,7 @@ fields:
     type: "string"
     required: true
     extraction_strategies: ["entity_match", "key_value", "regex"]
+    catalog_ref: "model_master"
     confidence_weight: 1.0
 
   horse_power:
@@ -92,13 +182,13 @@ fields:
       - "grand total"
       - "invoice total"
       - "total amount"
-      - "total (₹)"
+      - "total (rs.)"
       - "amount payable"
     type: "currency"
     required: true
     extraction_strategies: ["key_value", "regex"]
     regex_patterns:
-      - "(?:asset\\s*cost|total\\s*cost|grand\\s*total|invoice\\s*total|total\\s*amount|total\\s*\\([^)]*\\)?)\\s*[:\\-]?\\s*(?:rs\\.?|inr|₹)?\\s*([\\d,]+(?:\\.\\d{1,2})?)"
+      - "(?:asset\\s*cost|total\\s*cost|grand\\s*total|invoice\\s*total|total\\s*amount|total\\s*\\([^)]*\\)?)\\s*[:\\-]?\\s*(?:rs\\.?|inr|\\u20b9)?\\s*([\\d,]+(?:\\.\\d{1,2})?)"
     min_value: 50000.0
     max_value: 50000000.0
     confidence_weight: 1.0
@@ -210,7 +300,7 @@ validations:
     rule_type: "range_check"
     expression: "asset_cost >= 50000.0 and asset_cost <= 50000000.0"
     severity: "error"
-    message: "Asset Cost is outside plausible commercial range [₹50,000, ₹50,000,000]."
+    message: "Asset Cost is outside plausible commercial range [Rs.50,000, Rs.50,000,000]."
 
 auto_approve_threshold: 0.88
 review_threshold: 0.70

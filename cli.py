@@ -87,7 +87,11 @@ def format_visual_mark(name: str, mark_obj) -> str:
 
 
 def display_results(final_doc: FinalDocument) -> None:
-    """Print clean formatted multi-document result card to terminal."""
+    """
+    Print clean formatted result card to terminal.
+    Fully schema-driven — no document-type-specific branches.
+    Works for any document type: restaurant receipts, tractor invoices, insurance claims, etc.
+    """
     print("\n" + BANNER_LINE)
     print("DOCUMENT AI EXTRACTION RESULT")
     print(BANNER_LINE + "\n")
@@ -97,90 +101,54 @@ def display_results(final_doc: FinalDocument) -> None:
 
     all_fields = final_doc.get_all_fields()
 
-    if dtype == "restaurant_receipt":
-        # --- Merchant ---
-        print("[ MERCHANT DETAILS ]")
-        if "merchant_name" in all_fields:
-            print(format_field_display("Establishment", all_fields["merchant_name"]))
-        if "merchant_tagline" in all_fields and all_fields["merchant_tagline"].is_present():
-            print(format_field_display("Tagline", all_fields["merchant_tagline"]))
-        if "merchant_address" in all_fields and all_fields["merchant_address"].is_present():
-            print(format_field_display("Address", all_fields["merchant_address"]))
-        if "merchant_phone" in all_fields and all_fields["merchant_phone"].is_present():
-            print(format_field_display("Phone", all_fields["merchant_phone"]))
-
-        # --- Metadata ---
-        print("\n[ ORDER METADATA ]")
-        for k in ["invoice_number", "invoice_date", "invoice_time", "order_number", "table_number", "cashier"]:
-            if k in all_fields and all_fields[k].is_present():
-                lbl = k.replace("_", " ").title()
-                print(format_field_display(lbl, all_fields[k]))
-
-        # --- Tables (Line Items) ---
-        for tab in final_doc.tables:
-            print(f"\n[ {tab.name.upper()} ({len(tab.rows)} items) ]")
-            print(f"  {'S.No':<5} {'Item Name':<28} {'Qty':<5} {'Unit Price':<12} {'Amount':<10}")
-            print("  " + "-" * 64)
-            for r in tab.rows:
-                sno = str(r.get("sno", ""))
-                item = str(r.get("item", ""))[:26]
-                qty = str(r.get("qty", ""))
-                uprice = f"₹{r.get('unit_price', ''):.2f}" if isinstance(r.get('unit_price'), (int, float)) else str(r.get('unit_price', ''))
-                amt = f"₹{r.get('amount', ''):.2f}" if isinstance(r.get('amount'), (int, float)) else str(r.get('amount', ''))
-                print(f"  {sno:<5} {item:<28} {qty:<5} {uprice:<12} {amt:<10}")
-
-        # --- Totals ---
-        print("\n[ FINANCIAL TOTALS & TAXES ]")
-        for k in ["subtotal", "discount_percentage", "discount_amount", "taxable_amount", "cgst_rate_pct", "cgst_amount", "sgst_rate_pct", "sgst_amount", "grand_total", "amount_in_words"]:
-            if k in all_fields and all_fields[k].is_present():
-                lbl = k.replace("_", " ").title()
-                unit = "Rs." if "amount" in k or "total" in k else ("%" if "rate" in k or "pct" in k or "percentage" in k else "")
-                print(format_field_display(lbl, all_fields[k], unit=unit))
-
-        # --- Payment ---
-        print("\n[ PAYMENT INFO ]")
-        for k in ["payment_mode", "upi_ref_no", "payment_status"]:
-            if k in all_fields and all_fields[k].is_present():
-                lbl = k.replace("_", " ").title()
-                print(format_field_display(lbl, all_fields[k]))
-
-    elif dtype == "tractor_invoice":
-        # --- Tractor Invoice View ---
-        print("[ EQUIPMENT & FINANCING ]")
-        print(format_field_display("Dealer Name", final_doc.dealer_name))
-        print(format_field_display("Model Name", final_doc.model_name))
-        print(format_field_display("Horse Power", final_doc.horse_power, unit="HP"))
-        print(format_field_display("Asset Cost", final_doc.asset_cost, unit="Rs."))
-
-
-        print("\n[ DOCUMENT METADATA ]")
-        if final_doc.invoice_number.is_present():
-            print(format_field_display("Invoice Number", final_doc.invoice_number))
-        if final_doc.invoice_date.is_present():
-            print(format_field_display("Invoice Date", final_doc.invoice_date))
-        if final_doc.customer_name.is_present():
-            print(format_field_display("Customer Name", final_doc.customer_name))
-        if final_doc.phone_number.is_present():
-            print(format_field_display("Phone Number", final_doc.phone_number))
-
-        print("\n[ VISUAL MARKS ]")
-        print(format_visual_mark("Dealer Signature", final_doc.dealer_signature))
-        print(format_visual_mark("Dealer Stamp", final_doc.dealer_stamp))
-
+    # --- Fields grouped by section ---
+    sections = final_doc.sections or {}
+    if sections:
+        for section_name, section_fields in sections.items():
+            if not section_fields:
+                continue
+            print(f"[ {section_name.upper().replace('_', ' ')} ]")
+            for fname in section_fields:
+                fval = all_fields.get(fname)
+                if fval and fval.is_present():
+                    lbl = fname.replace("_", " ").title()
+                    print(format_field_display(lbl, fval))
+            print()
     else:
-        # --- Generic Unknown Document View ---
-        print("[ DISCOVERED KEY-VALUES ]")
-        for k, fval in all_fields.items():
-            if fval.is_present():
-                lbl = k.replace("_", " ").title()
-                print(format_field_display(lbl, fval))
+        # No sections: flat list of all extracted fields
+        if all_fields:
+            print("[ EXTRACTED FIELDS ]")
+            for fname, fval in all_fields.items():
+                if fval.is_present():
+                    lbl = fname.replace("_", " ").title()
+                    print(format_field_display(lbl, fval))
+            print()
 
-        for tab in final_doc.tables:
-            print(f"\n[ DETECTED TABLE: {tab.name.upper()} ({len(tab.rows)} rows) ]")
-            for r in tab.rows:
-                print("  " + str(r))
+    # --- Tables (generic multi-column display) ---
+    for tab in final_doc.tables:
+        rows = tab.rows
+        print(f"[ {tab.name.upper().replace('_', ' ')} — {len(rows)} rows ]")
+        if rows:
+            # Build header from first row keys
+            headers = list(rows[0].keys())
+            col_w = 18
+            header_line = "  " + "".join(f"{h.replace('_',' ').title():<{col_w}}" for h in headers)
+            print(header_line)
+            print("  " + "-" * min(len(header_line) - 2, 80))
+            for r in rows:
+                row_line = "  " + "".join(f"{str(r.get(h, '')):<{col_w}}" for h in headers)
+                print(row_line)
+        print()
 
-    print("\n" + BANNER_LINE)
+    # --- Visual Marks (schema-driven, generic iteration) ---
+    if final_doc.visual_marks:
+        print("[ VISUAL MARKS ]")
+        for mark_name, mark_obj in final_doc.visual_marks.items():
+            label = mark_name.replace("_", " ").title()
+            print(format_visual_mark(label, mark_obj))
+        print()
+
+    print(BANNER_LINE)
     print(f"Overall Confidence : {final_doc.overall_confidence:.4f}")
     if final_doc.decision == ReviewDecision.AUTO_APPROVE:
         print("Review Decision    : AUTO-APPROVED")
@@ -204,10 +172,7 @@ def cmd_predict(args: argparse.Namespace) -> int:
         print(f"Error: Input file not found: '{input_file}'", file=sys.stderr)
         sys.exit(1)
 
-    dealer_master, model_master = load_custom_config(args.config)
     pipeline = DocumentAIPipeline(
-        dealer_master=dealer_master,
-        model_master=model_master,
         ocr_lang=args.language,
         enable_preprocessing=not args.no_preprocess,
     )

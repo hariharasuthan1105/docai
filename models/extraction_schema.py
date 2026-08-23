@@ -1,8 +1,11 @@
 """
-Expanded and Calibrated Data Models for Multi-Document AI.
+Generic Data Models for Multi-Document AI.
 
-Supports schema-driven generic document results (restaurant receipts, tractor invoices,
-generic documents), multi-column tables, visual marks, and backward-compatible adapters.
+DocumentResult is the single primary output model.
+FinalDocument is an alias kept for import backward compatibility.
+
+Domain-specific field classes (dealer_name, horse_power, etc.) have been
+moved to docai/legacy/tractor_adapter.py.
 """
 
 from __future__ import annotations
@@ -94,7 +97,12 @@ class ValidationSummary(BaseModel):
 
 class DocumentResult(BaseModel):
     """
-    Standardized, schema-driven multi-document result wrapper.
+    Generic schema-driven document extraction result.
+
+    Works for any document type — restaurant receipts, tractor invoices,
+    insurance claims, purchase orders, etc.  Domain fields are stored in
+    the generic `fields` dict keyed by field name.  The schema YAML determines
+    which fields exist; this class never enumerates them.
     """
 
     document_id: str = "doc_001"
@@ -102,12 +110,16 @@ class DocumentResult(BaseModel):
     document_type: str = "generic"
     document_type_confidence: float = 1.0
 
-    # Fields can be structured hierarchically by section or as a flat map
-    sections: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    # All extracted fields as a generic dict: field_name -> FieldValue
     fields: Dict[str, FieldValue] = Field(default_factory=dict)
+
+    # Detected tables
     tables: List[TableResult] = Field(default_factory=list)
 
-    # Visual Marks (if applicable)
+    # Fields grouped by schema section for display
+    sections: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+
+    # Visual marks detected by CV (e.g. signature, stamp) — keyed by mark name from schema
     visual_marks: Dict[str, VisualMark] = Field(default_factory=dict)
 
     # Validation & Confidence
@@ -121,6 +133,10 @@ class DocumentResult(BaseModel):
     # Telemetry
     processing_time_ms: float = 0.0
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    def get_all_fields(self) -> Dict[str, FieldValue]:
+        """Return all extracted fields dict (generic API)."""
+        return dict(self.fields)
 
     def to_dict(self) -> Dict[str, Any]:
         """Export clean standardized JSON structure."""
@@ -176,119 +192,18 @@ class DocumentResult(BaseModel):
             "metadata": self.metadata,
         }
 
-
-class FinalDocument(BaseModel):
-    """
-    Backward-compatible structured output adapter for legacy tractor invoice pipelines.
-    """
-
-    document_id: str = "doc_001"
-    document: str = ""
-    document_type: str = "tractor_invoice"
-    document_type_confidence: float = 1.0
-
-    # Primary Equipment & Financial Fields
-    dealer_name: FieldValue = Field(default_factory=FieldValue)
-    model_name: FieldValue = Field(default_factory=FieldValue)
-    horse_power: FieldValue = Field(default_factory=FieldValue)
-    asset_cost: FieldValue = Field(default_factory=FieldValue)
-
-    # Document Metadata & Customer Fields
-    invoice_number: FieldValue = Field(default_factory=FieldValue)
-    invoice_date: FieldValue = Field(default_factory=FieldValue)
-    customer_name: FieldValue = Field(default_factory=FieldValue)
-    customer_address: FieldValue = Field(default_factory=FieldValue)
-    phone_number: FieldValue = Field(default_factory=FieldValue)
-    registration_number: FieldValue = Field(default_factory=FieldValue)
-    serial_number: FieldValue = Field(default_factory=FieldValue)
-
-    # Visual Marks
-    dealer_signature: VisualMark = Field(default_factory=VisualMark)
-    dealer_stamp: VisualMark = Field(default_factory=VisualMark)
-
-    # Extended Tables and Generic Fields
-    tables: List[TableResult] = Field(default_factory=list)
-    generic_fields: Dict[str, FieldValue] = Field(default_factory=dict)
-    sections: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
-
-    # Confidence & Human-in-the-loop Decision
-    overall_confidence: float = 0.0
-    calibrated_confidence: Optional[float] = None
-    decision: ReviewDecision = ReviewDecision.AUTO_APPROVE
-    needs_human_review: bool = False
-    review_reasons: List[str] = Field(default_factory=list)
-
-    # Telemetry
-    processing_time_ms: float = 0.0
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-
-    def get_all_fields(self) -> Dict[str, FieldValue]:
-        """Return dictionary mapping field name to FieldValue object."""
-        res = {
-            "dealer_name": self.dealer_name,
-            "model_name": self.model_name,
-            "horse_power": self.horse_power,
-            "asset_cost": self.asset_cost,
-            "invoice_number": self.invoice_number,
-            "invoice_date": self.invoice_date,
-            "customer_name": self.customer_name,
-            "customer_address": self.customer_address,
-            "phone_number": self.phone_number,
-            "registration_number": self.registration_number,
-            "serial_number": self.serial_number,
-        }
-        res.update(self.generic_fields)
-        return res
-
+    # Backward-compat alias for code that calls .to_legacy_dict()
     def to_legacy_dict(self) -> Dict[str, Any]:
-        """Export clean legacy-compatible JSON structure."""
-        fields_dict: Dict[str, Any] = {}
-        for name, f_obj in self.get_all_fields().items():
-            if f_obj.is_present():
-                fields_dict[name] = {
-                    "value": f_obj.value,
-                    "confidence": round(f_obj.confidence, 4),
-                    "bbox": f_obj.bbox,
-                    "source": f_obj.source.value if f_obj.source else f_obj.method,
-                    "page": f_obj.page,
-                }
-            else:
-                fields_dict[name] = {
-                    "value": None,
-                    "confidence": 0.0,
-                    "bbox": None,
-                }
+        return self.to_dict()
 
-        fields_dict["dealer_signature"] = {
-            "status": self.dealer_signature.status,
-            "present": self.dealer_signature.present,
-            "confidence": round(self.dealer_signature.confidence, 4),
-            "bbox": self.dealer_signature.bbox,
-        }
-        fields_dict["dealer_stamp"] = {
-            "status": self.dealer_stamp.status,
-            "present": self.dealer_stamp.present,
-            "confidence": round(self.dealer_stamp.confidence, 4),
-            "bbox": self.dealer_stamp.bbox,
-        }
+    # Backward-compat: needs_human_review property
+    @property
+    def needs_human_review(self) -> bool:
+        return self.review_required
 
-        tables_data = [{"name": t.name, "rows": t.rows} for t in self.tables]
 
-        return {
-            "document_id": self.document_id,
-            "document": self.document,
-            "document_type": self.document_type,
-            "document_type_confidence": round(self.document_type_confidence, 4),
-            "sections": self.sections,
-            "fields": fields_dict,
-            "tables": tables_data,
-            "validation": {
-                "overall_confidence": round(self.overall_confidence, 4),
-                "calibrated_confidence": round(self.calibrated_confidence, 4) if self.calibrated_confidence is not None else None,
-                "decision": self.decision.value,
-                "needs_human_review": self.needs_human_review,
-                "review_reasons": self.review_reasons,
-            },
-            "processing_time_ms": round(self.processing_time_ms, 2),
-            "metadata": self.metadata,
-        }
+# -----------------------------------------------------------------------
+# FinalDocument is now an alias for DocumentResult.
+# Kept for import backward compatibility only — no domain fields.
+# -----------------------------------------------------------------------
+FinalDocument = DocumentResult

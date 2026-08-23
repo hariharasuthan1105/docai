@@ -4,6 +4,12 @@ Schema-Driven Generic Field Extractor.
 Interprets any DocumentSchema dynamically without hardcoded domain knowledge.
 Executes declared extraction strategies (key_value, regex, entity_match, position_header)
 and type normalizations across non-table OCR regions.
+
+Extraction strategies are configured entirely in YAML schema fields:
+  - key_value:        label-anchor spatial matching
+  - regex:            schema-defined regex patterns
+  - position_header:  positional heuristics using field.position metadata
+  - entity_match:     fuzzy/exact catalog matching using field.catalog_ref or field.catalog_master
 """
 
 from __future__ import annotations
@@ -22,12 +28,12 @@ logger = logging.getLogger(__name__)
 
 
 def parse_numeric(val: Any) -> Optional[float]:
-    """Extract float value from string, ignoring percentage prefixes if a subsequent amount is present."""
+    """Extract float value from string, ignoring currency symbols and percentage prefixes."""
     if isinstance(val, (int, float)):
         return float(val)
     if not isinstance(val, str):
         return None
-    cleaned = val.replace(",", "").replace("₹", "").replace("Rs.", "").replace("INR", "").strip()
+    cleaned = val.replace(",", "").replace("\u20b9", "").replace("Rs.", "").replace("INR", "").strip()
     # Remove parenthesized percentage expressions e.g. '(10%)'
     cleaned = re.sub(r"\(\s*[-+]?\d+(?:\.\d+)?\s*%\s*\)", "", cleaned).strip()
     match = re.search(r"[-+]?\d+(?:\.\d+)?", cleaned)
@@ -37,7 +43,6 @@ def parse_numeric(val: Any) -> Optional[float]:
         except ValueError:
             pass
     return None
-
 
 
 def _bbox_to_list(bbox: Any) -> Optional[List[float]]:
@@ -53,6 +58,8 @@ def _bbox_to_list(bbox: Any) -> Optional[List[float]]:
 class SchemaExtractor:
     """
     Dynamically extracts fields defined by any DocumentSchema.
+    No knowledge of specific field names (dealer_name, horse_power, merchant_name, etc.)
+    is present in this class. All extraction behavior is driven by YAML schema metadata.
     """
 
     def __init__(self, schema: DocumentSchema, fuzzy_matcher: Optional[FuzzyMatcher] = None):
@@ -105,13 +112,13 @@ class SchemaExtractor:
                 if regex_cand and (best_candidate is None or regex_cand.confidence > best_candidate.confidence):
                     best_candidate = regex_cand
 
-            # Strategy C: Header Position Heuristic (for merchant name / address / title at top)
+            # Strategy C: Position Header (uses fdef.position metadata, NOT field name)
             if best_candidate is None and "position_header" in fdef.extraction_strategies:
-                hdr_cand = self._extract_position_header(active_lines, fname, fdef)
+                hdr_cand = self._extract_position_header(active_lines, fdef)
                 if hdr_cand:
                     best_candidate = hdr_cand
 
-            # Strategy D: Catalog / Entity Matching
+            # Strategy D: Catalog / Entity Matching (uses fdef.catalog_ref or fdef.catalog_master)
             if (best_candidate is None or best_candidate.confidence < 0.85) and "entity_match" in fdef.extraction_strategies:
                 entity_cand = self._extract_entity_match(active_lines, fdef)
                 if entity_cand and (best_candidate is None or entity_cand.confidence > best_candidate.confidence):
@@ -133,7 +140,6 @@ class SchemaExtractor:
             for pattern in compiled_regexes:
                 match = pattern.search(text)
                 if match:
-                    # Use captured group 1 if available, else group 0
                     raw_val = match.group(1) if match.groups() else match.group(0)
                     cleaned = clean_extracted_value(raw_val)
                     norm_val, is_valid = self._normalize_type(cleaned, fdef.type)
@@ -151,15 +157,19 @@ class SchemaExtractor:
         return None
 
     def _extract_position_header(
-        self, lines: List[OCRLine], fname: str, fdef: FieldDefinition
+        self, lines: List[OCRLine], fdef: FieldDefinition
     ) -> Optional[FieldValue]:
-        """Extract top header lines (e.g. restaurant name, address) positioned at top of document."""
-        if not lines:
+        """
+        Extract positional header fields using schema metadata on fdef.
+        Uses fdef.position ("first_header", "second_header", "header_block"),
+        fdef.tagline_markers, and fdef.address_keywords — NOT field name strings.
+        """
+        if not lines or not fdef.position:
             return None
 
-        # Filter lines in top header area (first 5 lines, no colon delimiters)
+        # Collect header candidate lines: top 6 non-delimiter lines
         header_candidates = []
-        for line in lines[:6]:
+        for line in lines[:8]:
             t = line.text.strip()
             if ":" not in t and "tax invoice" not in t.lower() and "bill" not in t.lower():
                 header_candidates.append(line)
@@ -167,8 +177,8 @@ class SchemaExtractor:
         if not header_candidates:
             return None
 
-        if fname in ["merchant_name", "dealer_name", "store_name"]:
-            # Line 0 is typically the brand/business name
+        if fdef.position == "first_header":
+            # First non-delimiter line is typically the brand/business name
             first = header_candidates[0]
             val = first.text.strip()
             return FieldValue(
@@ -179,43 +189,66 @@ class SchemaExtractor:
                 evidence=val,
                 bbox=_bbox_to_list(first.bbox),
                 page=1,
-                method="position_header_top",
+                method="position_header_first",
             )
 
-        if fname in ["merchant_tagline", "tagline"]:
-            # Line 1 if it contains slogan markers like bullet or tagline words
+        if fdef.position == "second_header":
+            # Second line if it matches any configured tagline_markers
             if len(header_candidates) >= 2:
                 sec = header_candidates[1]
                 t = sec.text.strip()
-                if "•" in t or "good" in t.lower() or "best" in t.lower():
+                markers = fdef.tagline_markers
+                if markers:
+                    if any(m.upper() in t.upper() for m in markers):
+                        return FieldValue(
+                            value=t,
+                            confidence=round(sec.confidence * 0.90, 4),
+                            source=FieldSource.LAYOUT_KV,
+                            source_text=t,
+                            evidence=t,
+                            bbox=_bbox_to_list(sec.bbox),
+                            page=1,
+                            method="position_header_second",
+                        )
+                else:
+                    # No markers configured: return second line unconditionally
                     return FieldValue(
                         value=t,
-                        confidence=round(sec.confidence * 0.90, 4),
+                        confidence=round(sec.confidence * 0.85, 4),
                         source=FieldSource.LAYOUT_KV,
                         source_text=t,
                         evidence=t,
                         bbox=_bbox_to_list(sec.bbox),
                         page=1,
-                        method="position_header_tagline",
+                        method="position_header_second",
                     )
 
-        if fname in ["merchant_address", "address", "dealer_address"]:
-            # Lines following name/tagline with address indicators (PIN, street, extension)
+        if fdef.position == "header_block":
+            # Collect lines that match any configured address_keywords
+            addr_keywords = fdef.address_keywords
             addr_parts = []
             bboxes = []
             for line in header_candidates[1:]:
                 t = line.text.strip()
-                if any(kw in t.lower() for kw in ["delhi", "road", "street", "park", "extension", "nagar", "pin", "floor", "-"]):
+                if addr_keywords:
+                    if any(kw.lower() in t.lower() for kw in addr_keywords):
+                        addr_parts.append(t)
+                        bboxes.append(line.bbox)
+                else:
+                    # No keywords configured: collect all header block lines
                     addr_parts.append(t)
                     bboxes.append(line.bbox)
 
             if addr_parts:
                 combined_addr = ", ".join(addr_parts)
-                b0 = bboxes[0]
-                b_last = bboxes[-1]
-                b0_list = _bbox_to_list(b0) or [0, 0, 0, 0]
-                b_last_list = _bbox_to_list(b_last) or [0, 0, 0, 0]
-                comb_bbox = [b0_list[0], b0_list[1], max((_bbox_to_list(b) or [0, 0, 0, 0])[2] for b in bboxes), b_last_list[3]]
+                b0_list = _bbox_to_list(bboxes[0]) or [0, 0, 0, 0]
+                b_last_list = _bbox_to_list(bboxes[-1]) or [0, 0, 0, 0]
+                comb_bbox = [
+                    b0_list[0],
+                    b0_list[1],
+                    max((_bbox_to_list(b) or [0, 0, 0, 0])[2] for b in bboxes),
+                    b_last_list[3],
+                ]
                 return FieldValue(
                     value=combined_addr,
                     confidence=0.90,
@@ -224,20 +257,28 @@ class SchemaExtractor:
                     evidence=combined_addr,
                     bbox=comb_bbox,
                     page=1,
-                    method="position_header_address",
+                    method="position_header_block",
                 )
 
         return None
 
     def _extract_entity_match(self, lines: List[OCRLine], fdef: FieldDefinition) -> Optional[FieldValue]:
-        """Match OCR lines against master catalogs if defined."""
-        catalog = fdef.catalog_master
-        if not catalog:
-            # Check built-in catalogs for backward compatibility
-            if fdef.name == "dealer_name":
-                catalog = getattr(self.fuzzy_matcher, "dealer_master", None)
-            elif fdef.name == "model_name":
-                catalog = getattr(self.fuzzy_matcher, "model_master", None)
+        """
+        Match OCR lines against a catalog list.
+        Catalog resolution order:
+          1. fdef.catalog_ref  -> look up name in schema.entity_catalogs
+          2. fdef.catalog_master -> inline list in field definition
+        No hardcoded field-name checks.
+        """
+        catalog: List[str] = []
+
+        # 1. Named catalog reference (from schema.entity_catalogs)
+        if fdef.catalog_ref:
+            catalog = self.schema.get_catalog(fdef.catalog_ref)
+
+        # 2. Inline catalog list in field definition
+        if not catalog and fdef.catalog_master:
+            catalog = fdef.catalog_master
 
         if not catalog:
             return None
@@ -248,12 +289,9 @@ class SchemaExtractor:
 
         for line in lines:
             text = line.text.strip()
-            # If line is too short or is a table header/row number, skip
             if len(text) < 3:
                 continue
-
             for entry in catalog:
-                # Use fuzzy similarity
                 score = self.fuzzy_matcher.calculate_similarity(text, entry)
                 if score > best_score and score >= 0.75:
                     best_score = score
@@ -290,14 +328,12 @@ class SchemaExtractor:
             return val_str, False
 
         if ftype == "phone":
-            # Extract 10-12 digit phone number
             digits = re.sub(r"[^\d\+]", "", val_str)
             if len(digits) >= 8:
                 return val_str, True
             return val_str, False
 
         if ftype == "date":
-            # Standardize date formats (e.g. 16/05/2025)
             dmatch = re.search(r"\b(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})\b", val_str)
             if dmatch:
                 return dmatch.group(1), True
@@ -309,5 +345,5 @@ class SchemaExtractor:
                 return tmatch.group(1), True
             return val_str, True
 
-        # Default string
+        # Default: string
         return val_str, True

@@ -45,18 +45,19 @@ class EntityMatcher:
 
     def __init__(
         self,
-        dealer_master: List[str],
-        model_master: List[str],
+        dealer_master: Optional[List[str]] = None,
+        model_master: Optional[List[str]] = None,
         dealer_threshold: float = 65.0,
         model_threshold: float = 75.0,
     ):
-        self.dealer_master = dealer_master
-        self.model_master = model_master
+        # Catalogs default to empty; they are populated from schema entity_catalogs at extraction time
+        self.dealer_master = dealer_master or []
+        self.model_master = model_master or []
         self.dealer_threshold = dealer_threshold
         self.model_threshold = model_threshold
 
-        self._norm_dealer_master = [normalize_text_for_matching(d) for d in dealer_master]
-        self._norm_model_master = [normalize_text_for_matching(m) for m in model_master]
+        self._norm_dealer_master = [normalize_text_for_matching(d) for d in self.dealer_master]
+        self._norm_model_master = [normalize_text_for_matching(m) for m in self.model_master]
 
     def calculate_similarity(self, s1: str, s2: str) -> float:
         """Compute fuzzy similarity ratio between two strings in [0.0, 1.0]."""

@@ -54,19 +54,14 @@ class LayoutKVExtractor:
         anchors: Optional[Dict[str, List[Pattern]]] = None,
         schema: Optional[DocumentSchema] = None,
     ):
+        # Anchors are derived exclusively from the provided schema.
+        # No hardcoded domain default — generic mode means no anchors.
         self.anchors: Dict[str, List[Pattern]] = {}
         if schema:
             self.load_schema_anchors(schema)
         elif anchors:
             self.anchors = anchors
-        else:
-            try:
-                from docai.schemas.schema_loader import get_schema_registry
-                default_s = get_schema_registry().get_schema("tractor_invoice")
-                if default_s:
-                    self.load_schema_anchors(default_s)
-            except Exception:
-                pass
+        # else: empty anchors → generic key-value split only (no field matching)
         self.spatial_index = SpatialIndex()
 
     def load_schema_anchors(self, schema: DocumentSchema) -> None:

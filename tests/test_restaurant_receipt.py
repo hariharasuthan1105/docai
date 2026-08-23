@@ -134,7 +134,11 @@ def test_restaurant_receipt_end_to_end():
     assert all_fields["payment_status"].value == "Paid"
 
     # 7. CRITICAL NEGATIVE TEST:
-    # Ensure NO tractor-specific field values contaminated the extraction!
-    assert not result.model_name.is_present(), "model_name should not be present in restaurant receipt"
-    assert not result.horse_power.is_present(), "horse_power should not be present in restaurant receipt"
-    assert not result.asset_cost.is_present(), "asset_cost should not be present in restaurant receipt"
+    # Ensure NO tractor-specific field values contaminated the restaurant receipt extraction.
+    # In the generic DocumentResult, these fields simply won't be in the fields dict.
+    assert "model_name" not in all_fields or not all_fields["model_name"].is_present(), \
+        "model_name should not be present in restaurant receipt"
+    assert "horse_power" not in all_fields or not all_fields["horse_power"].is_present(), \
+        "horse_power should not be present in restaurant receipt"
+    assert "asset_cost" not in all_fields or not all_fields["asset_cost"].is_present(), \
+        "asset_cost should not be present in restaurant receipt"

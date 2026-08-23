@@ -14,7 +14,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from docai.config import ASSET_COST_RANGE, HORSE_POWER_RANGE, REQUIRED_FIELDS
 from docai.models.extraction_schema import FieldValue
 
 logger = logging.getLogger(__name__)
@@ -38,7 +37,7 @@ class BaseValidationRule(ABC):
 
 class RequiredFieldsRule(BaseValidationRule):
     def __init__(self, required_fields: Optional[List[str]] = None):
-        self.required_fields = required_fields or REQUIRED_FIELDS
+        self.required_fields = required_fields or []
 
     def validate(self, fields: Dict[str, FieldValue]) -> List[ValidationResult]:
         results: List[ValidationResult] = []
@@ -186,13 +185,9 @@ class RuleEngine:
 
     @staticmethod
     def _default_rules() -> List[BaseValidationRule]:
-        return [
-            RequiredFieldsRule(REQUIRED_FIELDS),
-            NumericRangeRule("horse_power", *HORSE_POWER_RANGE, unit="HP"),
-            NumericRangeRule("asset_cost", *ASSET_COST_RANGE, unit="INR"),
-            DateFormatRule("invoice_date"),
-            PhoneNumberRule("phone_number"),
-        ]
+        # No domain-specific default rules.
+        # All rules are loaded from schema YAML by SchemaValidator.
+        return []
 
     def add_rule(self, rule: BaseValidationRule) -> None:
         self.rules.append(rule)
@@ -235,7 +230,7 @@ def check_numeric_range(
 
 
 def check_required_fields(fields: Dict[str, FieldValue]) -> List[str]:
-    rule = RequiredFieldsRule(REQUIRED_FIELDS)
+    rule = RequiredFieldsRule([])
     results = rule.validate(fields)
     return [r.message for r in results if not r.is_valid]
 

@@ -5,12 +5,15 @@ Coordinates:
 1. Intelligent Preprocessing (Deskew, Rotation Check, CLAHE, Denoise)
 2. PaddleOCR Multi-Page Text & Bounding Box Extraction
 3. Table Boundary & Header Detection (separating tabular rows from scalar fields)
-4. Dynamic Document Type Classification (e.g. restaurant_receipt, tractor_invoice, generic)
+4. Dynamic Document Type Classification (schema-driven, no hardcoded type checks)
 5. Schema-Driven Field Extraction (Key-Value, Regex, Entity Matching, Header Positions)
 6. Generic & Schema-Driven Multi-Column Table Extraction (e.g. line items)
-7. Computer Vision Signature & Stamp Detection
+7. Computer Vision Mark Detection (configured entirely from schema.visual_marks YAML)
 8. Schema-Driven Validation (table math, arithmetic balances, ranges, required fields)
 9. Calibrated Confidence Scoring & Human-in-the-Loop Decisioning
+
+NO domain-specific field names appear in this file.
+Adding a new document type requires ONLY a new YAML schema file.
 """
 
 from __future__ import annotations
@@ -20,7 +23,6 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from docai.classification.classifier import ClassificationResult, DocumentClassifier
-from docai.config import DEFAULT_DEALER_MASTER, DEFAULT_MODEL_MASTER
 from docai.extraction.fuzzy_matcher import FuzzyMatcher
 from docai.extraction.schema_extractor import SchemaExtractor
 from docai.layout.kv_extractor import LayoutKVExtractor
@@ -30,7 +32,6 @@ from docai.models.extraction_schema import (
     DocumentResult,
     FieldSource,
     FieldValue,
-    FinalDocument,
     ReviewDecision,
     TableResult,
     ValidationSummary,
@@ -43,12 +44,16 @@ from docai.validation.schema_validator import SchemaValidator
 from docai.vision.signature_detector import CVSignatureDetector, SignatureDetector
 from docai.vision.stamp_detector import CVStampDetector, StampDetector
 
+# FinalDocument alias for backward compatibility
+FinalDocument = DocumentResult
+
 logger = logging.getLogger(__name__)
 
 
 class DocumentAIPipeline:
     """
     Schema-driven, multi-document intelligence pipeline.
+    No hardcoded domain fields or document-type checks.
     """
 
     def __init__(
@@ -58,10 +63,11 @@ class DocumentAIPipeline:
         signature_detector: Optional[SignatureDetector] = None,
         stamp_detector: Optional[StampDetector] = None,
         calibrator: Optional[ConfidenceCalibrator] = None,
-        dealer_master: Optional[List[str]] = None,
-        model_master: Optional[List[str]] = None,
         ocr_lang: str = "en",
         enable_preprocessing: bool = True,
+        # Legacy kwargs accepted but ignored (catalogs now live in YAML)
+        dealer_master: Optional[List[str]] = None,
+        model_master: Optional[List[str]] = None,
     ):
         self.ocr_engine = ocr_engine or PaddleOCREngine(
             lang=ocr_lang,
@@ -74,11 +80,8 @@ class DocumentAIPipeline:
         self.signature_detector = signature_detector or CVSignatureDetector()
         self.stamp_detector = stamp_detector or CVStampDetector()
         self.calibrator = calibrator
-
-        self.fuzzy_matcher = FuzzyMatcher(
-            dealer_master=dealer_master or DEFAULT_DEALER_MASTER,
-            model_master=model_master or DEFAULT_MODEL_MASTER,
-        )
+        # Fuzzy matcher — no hardcoded catalogs; catalogs come from schema YAML
+        self.fuzzy_matcher = FuzzyMatcher()
 
     def process(
         self,
@@ -86,9 +89,10 @@ class DocumentAIPipeline:
         document_id: str = "doc_001",
         document_type: Optional[str] = None,
         on_progress: Optional[Callable[[str, int, int], None]] = None,
-    ) -> FinalDocument:
+    ) -> DocumentResult:
         """
         Execute end-to-end extraction pipeline on an input document.
+        Returns a generic DocumentResult (alias: FinalDocument).
         """
         start_time = time.perf_counter()
 
@@ -115,9 +119,10 @@ class DocumentAIPipeline:
             class_res = self.classifier.classify(ocr_result)
             selected_schema = class_res.schema or self.registry.get_schema("generic")
 
-        # 3. Table Boundary & Header Detection
+        # 3. Table Boundary & Header Detection (stop keywords from schema YAML)
         report("Analyzing layout, table boundaries, and column structures...", 3)
         self.table_detector.table_defs = selected_schema.tables if selected_schema else {}
+        self.table_detector.stop_keywords = selected_schema.stop_keywords if selected_schema else []
         table_regions = self.table_detector.detect_tables(ocr_result)
         table_lines = self.table_detector.get_table_line_indices(ocr_result, table_regions)
 
@@ -139,10 +144,11 @@ class DocumentAIPipeline:
         # 5. Schema-Driven Field Extraction (on non-table lines)
         report(f"Extracting fields for schema '{class_res.document_type}'...", 4)
         if selected_schema and selected_schema.document_type != "generic":
+            # Pass schema so FuzzyMatcher can use schema entity_catalogs
             schema_extractor = SchemaExtractor(selected_schema, fuzzy_matcher=self.fuzzy_matcher)
             extracted_fields = schema_extractor.extract(ocr_result, excluded_line_indices=table_lines)
         else:
-            # Fallback generic unknown document extraction
+            # Fallback generic unknown document: extract plain key-value pairs
             kv_ext = LayoutKVExtractor()
             generic_kvs = kv_ext.extract_generic_key_values(ocr_result.lines, excluded_line_indices=table_lines)
             extracted_fields = {}
@@ -159,13 +165,19 @@ class DocumentAIPipeline:
                     method="generic_kv_split",
                 )
 
-        # 6. Visual Marks Detection (Run for tractor invoices or when relevant)
-        sig_result = VisualMark()
-        stamp_result = VisualMark()
-        if class_res.document_type in ["tractor_invoice", "generic"]:
-            report("Checking handwritten signatures and official rubber stamps...", 5)
-            sig_result = self.signature_detector.detect(document_path)
-            stamp_result = self.stamp_detector.detect(document_path)
+        # 6. Visual Marks Detection — driven by schema.visual_marks YAML, not hardcoded type checks
+        visual_marks: Dict[str, VisualMark] = {}
+        if selected_schema and selected_schema.visual_marks:
+            report("Detecting schema-defined visual marks (signatures, stamps)...", 5)
+            for mark_def in selected_schema.visual_marks:
+                if mark_def.mark_type == "signature":
+                    vm = self.signature_detector.detect(document_path)
+                    vm.mark_type = "signature"
+                    visual_marks[mark_def.name] = vm
+                elif mark_def.mark_type == "stamp":
+                    vm = self.stamp_detector.detect(document_path)
+                    vm.mark_type = "stamp"
+                    visual_marks[mark_def.name] = vm
 
         # 7. Schema-Driven Validation
         report("Running schema validation rules and consistency checks...", 6)
@@ -180,7 +192,7 @@ class DocumentAIPipeline:
             validation_warnings = val_report.warnings
             passed_rules = val_report.passed_rules
 
-        # Group fields into sections
+        # Group fields into sections (schema-driven section names)
         sections_dict: Dict[str, Dict[str, Any]] = {}
         if selected_schema:
             for s in selected_schema.sections:
@@ -192,7 +204,14 @@ class DocumentAIPipeline:
                     sections_dict[sec] = {}
                 sections_dict[sec][fname] = fval.value
 
-        # Calculate Overall Confidence
+        # 8. Calculate Overall Confidence (field-weights from schema)
+        field_weights = None
+        if selected_schema:
+            field_weights = {
+                fname: fdef.confidence_weight
+                for fname, fdef in selected_schema.fields.items()
+            }
+
         field_confs = [f.confidence for f in extracted_fields.values() if f.is_present()]
         for t in extracted_tables:
             field_confs.append(t.confidence)
@@ -202,7 +221,6 @@ class DocumentAIPipeline:
         else:
             base_score = 0.50
 
-        # Adjust score based on validation errors
         if validation_errors:
             base_score = max(0.20, base_score - len(validation_errors) * 0.15)
         if validation_warnings:
@@ -211,7 +229,7 @@ class DocumentAIPipeline:
         overall_conf = round(min(0.99, max(0.10, base_score)), 4)
         calibrated_conf = self.calibrator.calibrate(overall_conf) if self.calibrator else None
 
-        # Human Review Decision
+        # 9. Human Review Decision
         auto_thresh = selected_schema.auto_approve_threshold if selected_schema else 0.88
         rev_thresh = selected_schema.review_threshold if selected_schema else 0.70
 
@@ -231,33 +249,25 @@ class DocumentAIPipeline:
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
-        # Construct FinalDocument adapter
-        final_doc = FinalDocument(
+        return DocumentResult(
             document_id=document_id,
             document=document_path,
             document_type=class_res.document_type,
             document_type_confidence=class_res.confidence,
-            # Populate standard tractor fields if present
-            dealer_name=extracted_fields.get("dealer_name", FieldValue()),
-            model_name=extracted_fields.get("model_name", FieldValue()),
-            horse_power=extracted_fields.get("horse_power", FieldValue()),
-            asset_cost=extracted_fields.get("asset_cost", FieldValue()),
-            invoice_number=extracted_fields.get("invoice_number", FieldValue()),
-            invoice_date=extracted_fields.get("invoice_date", FieldValue()),
-            customer_name=extracted_fields.get("customer_name", FieldValue()),
-            customer_address=extracted_fields.get("customer_address", FieldValue()),
-            phone_number=extracted_fields.get("phone_number", FieldValue()),
-            registration_number=extracted_fields.get("registration_number", FieldValue()),
-            serial_number=extracted_fields.get("serial_number", FieldValue()),
-            dealer_signature=sig_result,
-            dealer_stamp=stamp_result,
+            fields=extracted_fields,
             tables=extracted_tables,
-            generic_fields=extracted_fields,
             sections=sections_dict,
+            visual_marks=visual_marks,
+            validation=ValidationSummary(
+                is_valid=not bool(validation_errors),
+                passed_rules=passed_rules,
+                errors=validation_errors,
+                warnings=validation_warnings,
+            ),
             overall_confidence=overall_conf,
             calibrated_confidence=calibrated_conf,
             decision=decision,
-            needs_human_review=needs_review,
+            review_required=needs_review,
             review_reasons=review_reasons,
             processing_time_ms=elapsed_ms,
             metadata={
@@ -277,25 +287,21 @@ class DocumentAIPipeline:
             },
         )
 
-        return final_doc
-
 
 def run_pipeline(
     document_path: str,
     ocr_engine: Optional[OCREngine] = None,
     registry: Optional[SchemaRegistry] = None,
-    dealer_master: Optional[List[str]] = None,
-    model_master: Optional[List[str]] = None,
+    dealer_master: Optional[List[str]] = None,   # Legacy arg: accepted but ignored
+    model_master: Optional[List[str]] = None,    # Legacy arg: accepted but ignored
     ocr_lang: str = "en",
     document_type: Optional[str] = None,
     on_progress: Optional[Callable[[str, int, int], None]] = None,
-) -> FinalDocument:
+) -> DocumentResult:
     """Convenience helper to run the pipeline with defaults."""
     pipeline = DocumentAIPipeline(
         ocr_engine=ocr_engine,
         registry=registry,
-        dealer_master=dealer_master,
-        model_master=model_master,
         ocr_lang=ocr_lang,
     )
     return pipeline.process(document_path, document_type=document_type, on_progress=on_progress)

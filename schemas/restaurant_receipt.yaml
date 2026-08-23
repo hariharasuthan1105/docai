@@ -42,6 +42,23 @@ sections:
   - "totals"
   - "payment"
 
+
+# No visual marks for restaurant receipts
+vision:
+  marks: []
+
+# Schema-driven table stop keywords
+stop_keywords:
+  - "subtotal"
+  - "sub total"
+  - "grand total"
+  - "taxable"
+  - "cgst"
+  - "sgst"
+  - "discount"
+  - "total"
+  - "thank you"
+  - "authorized signatory"
 fields:
   # --- Merchant Section ---
   merchant_name:
@@ -52,6 +69,7 @@ fields:
     type: "string"
     required: false
     extraction_strategies: ["position_header", "key_value"]
+    position: "first_header"
     confidence_weight: 1.0
 
 
@@ -62,6 +80,8 @@ fields:
     type: "string"
     required: false
     extraction_strategies: ["position_header"]
+    position: "second_header"
+    tagline_markers: ["•", "GOOD", "BEST", "FRESH", "QUALITY"]
     confidence_weight: 0.8
 
   merchant_address:
@@ -73,6 +93,8 @@ fields:
     type: "string"
     required: false
     extraction_strategies: ["position_header", "key_value"]
+    position: "header_block"
+    address_keywords: ["road", "street", "park", "extension", "nagar", "pin", "floor", "sector", "colony", "-", ","]
     confidence_weight: 0.9
 
   merchant_phone:
@@ -400,3 +422,4 @@ validations:
 
 auto_approve_threshold: 0.88
 review_threshold: 0.70
+

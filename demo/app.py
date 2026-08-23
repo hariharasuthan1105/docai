@@ -32,8 +32,6 @@ def draw_bounding_boxes(image: Image.Image, final_doc: FinalDocument) -> Image.I
 
     # Color palette
     field_color = (0, 120, 255)
-    sig_color = (34, 197, 94)
-    stamp_color = (239, 68, 68)
 
     # Draw fields
     all_fields = final_doc.get_all_fields()
@@ -44,17 +42,14 @@ def draw_bounding_boxes(image: Image.Image, final_doc: FinalDocument) -> Image.I
             label = f"{fname}: {fval.value} ({fval.confidence:.2f})"
             draw.text((x0, max(0, y0 - 12)), label, fill=field_color)
 
-    # Draw signature
-    if final_doc.dealer_signature.present and final_doc.dealer_signature.bbox:
-        x0, y0, x1, y1 = final_doc.dealer_signature.bbox
-        draw.rectangle([x0, y0, x1, y1], outline=sig_color, width=4)
-        draw.text((x0, max(0, y0 - 14)), f"Signature ({final_doc.dealer_signature.confidence:.2f})", fill=sig_color)
-
-    # Draw stamp
-    if final_doc.dealer_stamp.present and final_doc.dealer_stamp.bbox:
-        x0, y0, x1, y1 = final_doc.dealer_stamp.bbox
-        draw.rectangle([x0, y0, x1, y1], outline=stamp_color, width=4)
-        draw.text((x0, max(0, y0 - 14)), f"Stamp ({final_doc.dealer_stamp.confidence:.2f})", fill=stamp_color)
+    # Draw visual marks (schema-driven, generic iteration)
+    for mark_name, mark_obj in final_doc.visual_marks.items():
+        if mark_obj.present and mark_obj.bbox:
+            color = (34, 197, 94) if mark_obj.mark_type == "signature" else (239, 68, 68)
+            x0, y0, x1, y1 = mark_obj.bbox
+            draw.rectangle([x0, y0, x1, y1], outline=color, width=4)
+            label_text = f"{mark_name.replace('_', ' ').title()} ({mark_obj.confidence:.2f})"
+            draw.text((x0, max(0, y0 - 14)), label_text, fill=color)
 
     return img_draw
 
@@ -161,15 +156,19 @@ def main():
                     })
                 st.table(table_data)
 
-                # Visual Marks
-                st.subheader("🖋️ Visual Mark Verification")
-                vm_col1, vm_col2 = st.columns(2)
-                with vm_col1:
-                    sig_status = "✅ Detected" if final_doc.dealer_signature.present else "❌ Not Found"
-                    st.write(f"**Dealer Signature:** {sig_status} ({final_doc.dealer_signature.confidence:.2%})")
-                with vm_col2:
-                    stamp_status = "✅ Detected" if final_doc.dealer_stamp.present else "❌ Not Found"
-                    st.write(f"**Dealer Stamp:** {stamp_status} ({final_doc.dealer_stamp.confidence:.2%})")
+                # Visual Marks (schema-driven generic iteration)
+                if final_doc.visual_marks:
+                    st.subheader("🖋️ Visual Mark Verification")
+                    vm_cols = st.columns(max(1, len(final_doc.visual_marks)))
+                    for col, (mark_name, mark_obj) in zip(vm_cols, final_doc.visual_marks.items()):
+                        with col:
+                            label = mark_name.replace("_", " ").title()
+                            if mark_obj.status == "not_implemented":
+                                st.write(f"**{label}:** ⚠️ Not Implemented")
+                            elif mark_obj.present:
+                                st.write(f"**{label}:** ✅ Detected ({mark_obj.confidence:.2%})")
+                            else:
+                                st.write(f"**{label}:** ❌ Not Found ({mark_obj.confidence:.2%})")
 
                 # Visual bounding box overlay
                 if display_img:

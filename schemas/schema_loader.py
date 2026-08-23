@@ -2,6 +2,8 @@
 Dynamic Schema Loader and Models for Multi-Document AI.
 
 Loads YAML schema definitions and compiles them into structured Pydantic models.
+All domain-specific logic (catalogs, validation ranges, visual marks, address keywords)
+is declared in YAML schemas, not in Python code.
 """
 
 from __future__ import annotations
@@ -30,6 +32,12 @@ class FieldDefinition(BaseModel):
     format_pattern: Optional[str] = None
     confidence_weight: float = 1.0
     catalog_master: Optional[List[str]] = None
+    catalog_ref: Optional[str] = None  # Named catalog reference from schema.entity_catalogs
+
+    # Position-header extraction metadata (replaces hardcoded field-name checks)
+    position: Optional[str] = None           # "first_header" | "second_header" | "header_block"
+    address_keywords: List[str] = Field(default_factory=list)  # Keywords for address line detection
+    tagline_markers: List[str] = Field(default_factory=list)   # Markers for tagline detection
 
     def get_compiled_regexes(self) -> List[Pattern]:
         compiled = []
@@ -44,7 +52,6 @@ class FieldDefinition(BaseModel):
         compiled = []
         for alias in self.aliases:
             escaped = re.escape(alias.strip())
-            # Match anchor at start of string or preceded by non-word
             pat_str = rf"(?:^|[\b\s]){escaped}\s*[:\-]?"
             try:
                 compiled.append(re.compile(pat_str, re.IGNORECASE))
@@ -56,7 +63,7 @@ class FieldDefinition(BaseModel):
 class TableColumnDefinition(BaseModel):
     key: str
     aliases: List[str] = Field(default_factory=list)
-    type: str = "string"  # "string", "number", "currency"
+    type: str = "string"
     required: bool = False
 
 
@@ -64,16 +71,23 @@ class TableDefinition(BaseModel):
     name: str
     header_keywords: List[str] = Field(default_factory=list)
     columns: List[TableColumnDefinition] = Field(default_factory=list)
-    row_formula: Optional[str] = None  # e.g. "qty * unit_price == amount"
+    row_formula: Optional[str] = None
     min_rows: int = 1
 
 
 class ValidationRuleDefinition(BaseModel):
     name: str
-    rule_type: str  # "arithmetic_balance", "range_check", "format_check", "table_row_check"
+    rule_type: str
     expression: Optional[str] = None
-    severity: str = "error"  # "error", "warning"
+    severity: str = "error"
     message: str = ""
+
+
+class VisualMarkDefinition(BaseModel):
+    """Schema-configured visual mark (e.g. signature or stamp)."""
+    name: str          # Unique key used in DocumentResult.visual_marks dict
+    mark_type: str     # "signature" or "stamp"
+    label: str = ""    # Human-readable label for CLI/demo display
 
 
 class ClassificationHints(BaseModel):
@@ -97,17 +111,28 @@ class DocumentSchema(BaseModel):
     auto_approve_threshold: float = 0.88
     review_threshold: float = 0.70
 
+    # Schema-driven visual marks -- replaces hardcoded "dealer_signature"/"dealer_stamp"
+    visual_marks: List[VisualMarkDefinition] = Field(default_factory=list)
+
+    # Schema-driven table stop keywords -- replaces hardcoded list in table_detector.py
+    stop_keywords: List[str] = Field(default_factory=list)
+
+    # Named entity catalogs for fuzzy/exact matching (referenced by field.catalog_ref)
+    entity_catalogs: Dict[str, List[str]] = Field(default_factory=dict)
+
     def get_field(self, field_name: str) -> Optional[FieldDefinition]:
         return self.fields.get(field_name)
 
     def get_fields_in_section(self, section: str) -> List[FieldDefinition]:
         return [f for f in self.fields.values() if f.section == section]
 
+    def get_catalog(self, catalog_ref: str) -> List[str]:
+        """Resolve a named catalog reference to its list."""
+        return self.entity_catalogs.get(catalog_ref, [])
+
 
 class SchemaRegistry:
-    """
-    Central repository of all registered document schemas.
-    """
+    """Central repository of all registered document schemas."""
 
     def __init__(self, schemas_dir: Optional[str] = None):
         self.schemas_dir = schemas_dir or os.path.dirname(os.path.abspath(__file__))
@@ -116,7 +141,6 @@ class SchemaRegistry:
         self.load_all()
 
     def load_all(self) -> None:
-        """Load registry.yaml and all referenced schema YAML files."""
         registry_path = os.path.join(self.schemas_dir, "registry.yaml")
         if os.path.exists(registry_path):
             with open(registry_path, "r", encoding="utf-8") as f:
@@ -132,7 +156,6 @@ class SchemaRegistry:
                     if schema:
                         self.schemas[schema.document_type] = schema
 
-        # Load any other yaml schemas present in the directory
         for fname in os.listdir(self.schemas_dir):
             if fname.endswith(".yaml") and fname not in ["registry.yaml"]:
                 full_path = os.path.join(self.schemas_dir, fname)
@@ -141,7 +164,6 @@ class SchemaRegistry:
                     self.schemas[schema.document_type] = schema
 
     def load_schema_file(self, file_path: str) -> Optional[DocumentSchema]:
-        """Load a single schema YAML file into DocumentSchema."""
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 raw = yaml.safe_load(f)
@@ -151,7 +173,6 @@ class SchemaRegistry:
             dtype = raw.get("document_type", os.path.splitext(os.path.basename(file_path))[0])
             title = raw.get("title", dtype.replace("_", " ").title())
 
-            # Parse fields
             raw_fields = raw.get("fields", {})
             fields_dict = {}
             for fname, fmeta in raw_fields.items():
@@ -159,7 +180,6 @@ class SchemaRegistry:
                     fmeta["name"] = fname
                     fields_dict[fname] = FieldDefinition(**fmeta)
 
-            # Parse tables
             raw_tables = raw.get("tables", {})
             tables_dict = {}
             for tname, tmeta in raw_tables.items():
@@ -182,8 +202,6 @@ class SchemaRegistry:
                     tmeta["columns"] = cols
                     tables_dict[tname] = TableDefinition(**tmeta)
 
-
-            # Parse validations
             raw_val = raw.get("validations", [])
             validations_list = []
             if isinstance(raw_val, list):
@@ -191,9 +209,22 @@ class SchemaRegistry:
                     if isinstance(v, dict):
                         validations_list.append(ValidationRuleDefinition(**v))
 
-            # Parse classification hints
             raw_class = raw.get("classification", {})
             class_hints = ClassificationHints(**raw_class) if isinstance(raw_class, dict) else ClassificationHints()
+
+            raw_vision = raw.get("vision", {})
+            marks_list = []
+            if isinstance(raw_vision, dict):
+                for m in raw_vision.get("marks", []):
+                    if isinstance(m, dict):
+                        marks_list.append(VisualMarkDefinition(**m))
+
+            stop_kws = raw.get("stop_keywords", [])
+            if not isinstance(stop_kws, list):
+                stop_kws = []
+
+            raw_catalogs = raw.get("entity_catalogs", {})
+            entity_catalogs = raw_catalogs if isinstance(raw_catalogs, dict) else {}
 
             return DocumentSchema(
                 document_type=dtype,
@@ -207,20 +238,21 @@ class SchemaRegistry:
                 validations=validations_list,
                 auto_approve_threshold=float(raw.get("auto_approve_threshold", 0.88)),
                 review_threshold=float(raw.get("review_threshold", 0.70)),
+                visual_marks=marks_list,
+                stop_keywords=stop_kws,
+                entity_catalogs=entity_catalogs,
             )
         except Exception as e:
             logger.error("Failed to parse schema file %s: %s", file_path, e)
             return None
 
     def get_schema(self, document_type: str) -> Optional[DocumentSchema]:
-        """Retrieve schema by document type key (e.g. 'restaurant_receipt', 'tractor_invoice')."""
         return self.schemas.get(document_type)
 
     def list_document_types(self) -> List[str]:
         return list(self.schemas.keys())
 
 
-# Singleton instance
 _default_registry: Optional[SchemaRegistry] = None
 
 

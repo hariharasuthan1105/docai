@@ -20,7 +20,7 @@ import numpy as np
 from rapidfuzz.distance import Levenshtein
 
 from docai.evaluation.dataset import GroundTruthDocument, load_evaluation_dataset
-from docai.models.extraction_schema import FinalDocument
+from docai.models.extraction_schema import DocumentResult, FinalDocument
 from docai.pipeline import DocumentAIPipeline
 from docai.validation.confidence import ConfidenceCalibrator
 
@@ -68,21 +68,30 @@ class DocumentAIEvaluator:
             return f"{float(val):.2f}"
         return str(val).strip().lower()
 
-    def evaluate_dataset(self, dataset: Optional[List[GroundTruthDocument]] = None) -> EvaluationMetrics:
+    def evaluate_dataset(
+        self,
+        dataset: Optional[List[GroundTruthDocument]] = None,
+        field_names: Optional[List[str]] = None,
+    ) -> EvaluationMetrics:
+        """
+        Evaluate extraction quality over a labelled dataset.
+
+        Args:
+            dataset: List of GroundTruthDocument records (loaded from disk if None).
+            field_names: Explicit list of field names to evaluate. If None,
+                         field names are derived dynamically from the union of all
+                         ground-truth document keys — no hardcoded domain fields.
+        """
         docs = dataset if dataset is not None else load_evaluation_dataset()
         if not docs:
             raise ValueError("No ground truth documents found for evaluation.")
 
-        field_names = [
-            "dealer_name",
-            "model_name",
-            "horse_power",
-            "asset_cost",
-            "invoice_number",
-            "invoice_date",
-            "customer_name",
-            "phone_number",
-        ]
+        # Dynamically derive field names from ground-truth data
+        if field_names is None:
+            all_gt_keys: set = set()
+            for doc in docs:
+                all_gt_keys.update(doc.ground_truth.keys())
+            field_names = sorted(all_gt_keys)
 
         # Tracking accumulators per field
         field_matches: Dict[str, List[bool]] = {fn: [] for fn in field_names}
@@ -121,13 +130,10 @@ class DocumentAIEvaluator:
 
                 is_match = False
                 if gt_norm and pred_norm:
-                    # Compare
-                    if fn in ["horse_power", "asset_cost"]:
-                        try:
-                            is_match = abs(float(gt_raw) - float(pred_raw)) < 0.01
-                        except Exception:
-                            is_match = (gt_norm == pred_norm)
-                    else:
+                    # Generic numeric comparison for numeric field types
+                    try:
+                        is_match = abs(float(gt_raw) - float(pred_raw)) < 0.01
+                    except Exception:
                         is_match = (gt_norm == pred_norm) or (gt_norm in pred_norm) or (pred_norm in gt_norm)
 
                     # NLED

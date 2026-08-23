@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from docai.config import AUTO_APPROVE_THRESHOLD, FIELD_WEIGHTS
+from docai.config import AUTO_APPROVE_THRESHOLD
 from docai.models.extraction_schema import FieldValue, ReviewDecision
 
 logger = logging.getLogger(__name__)
@@ -69,21 +69,32 @@ def compute_field_confidence(field_value: FieldValue) -> float:
     return min(1.0, max(0.0, round(score, 4)))
 
 
-def compute_overall_confidence(fields: Dict[str, FieldValue]) -> float:
+def compute_overall_confidence(
+    fields: Dict[str, FieldValue],
+    field_weights: Optional[Dict[str, float]] = None,
+) -> float:
     """
-    Compute weighted average confidence across all required fields.
+    Compute weighted average confidence across extracted fields.
+
+    If field_weights is provided (populated from schema YAML's confidence_weight values),
+    uses them. Otherwise falls back to a simple equal-weight average over all present fields.
     Missing fields contribute 0.0 confidence.
     """
-    total_weight = 0.0
-    weighted_sum = 0.0
+    if field_weights:
+        total_weight = 0.0
+        weighted_sum = 0.0
+        for field_name, weight in field_weights.items():
+            field_value = fields.get(field_name, FieldValue())
+            conf = field_value.confidence if field_value.is_present() else 0.0
+            weighted_sum += weight * conf
+            total_weight += weight
+        return round(weighted_sum / total_weight, 4) if total_weight > 0 else 0.0
 
-    for field_name, weight in FIELD_WEIGHTS.items():
-        field_value = fields.get(field_name, FieldValue())
-        conf = field_value.confidence if field_value.is_present() else 0.0
-        weighted_sum += weight * conf
-        total_weight += weight
-
-    return round(weighted_sum / total_weight, 4) if total_weight > 0 else 0.0
+    # Generic fallback: equal-weight average over all fields that are present
+    if not fields:
+        return 0.0
+    confs = [fv.confidence for fv in fields.values() if fv.is_present()]
+    return round(sum(confs) / len(confs), 4) if confs else 0.0
 
 
 def make_review_decision(
